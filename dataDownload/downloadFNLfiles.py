@@ -102,5 +102,5 @@ def downLoadFNLfiles(start_date, end_date):
             outfile.close()
 
 if __name__ == "__main__":
-    downLoadFNLfiles('2024-08-16','2024-08-16')
+    # downLoadFNLfiles('2024-08-16','2024-08-16')
     pass
