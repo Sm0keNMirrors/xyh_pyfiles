@@ -1,21 +1,216 @@
 import datetime
-
 import netCDF4 as nt
 import os
-import h5py
 import numpy as np
-import xlrd
-import xlwt
 import pandas as pd
-
-import xlutils.copy
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import netCDF4 as nc
-from matplotlib import ticker
-from windrose import WindroseAxes
-# from WRF_CMAQ.packcodes import WRFCMAQ_ToolFunctions as WCt
+from tqdm import tqdm
 
+
+def calcuRSME(modData, obsData):
+    """
+    计算RSME
+    :param modData: 模拟数据(列表)
+    :param obsData: 观测数据(列表)
+    :return: RSME
+    """
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度  # 数据总个数
+    ALL = 0
+    NAN_count = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            NAN_count += 1
+            continue
+        ALL += (modData[i] - obsData[i]) ** 2
+    return np.sqrt(ALL / (N-NAN_count))
+
+def calcuMAE(modData, obsData):
+    """
+    计算MAE
+    :param modData:
+    :param obsData:
+    :return:
+    """
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度  # 数据总个数
+    ALL = 0
+    NAN_count = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            NAN_count += 1
+            continue
+        ALL += abs(modData[i] - obsData[i])
+    return ALL / (N-NAN_count)
+
+def calcuMB(modData, obsData):
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    ALL = 0
+    NAN_count = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            NAN_count += 1
+            continue
+        ALL += modData[i] - obsData[i]
+    return ALL / (N-NAN_count)
+
+def calcuR(modData, obsData):
+    N = len(modData)  # 数据总个数
+    ALL1 = 0
+    ALL2 = 0
+    ALL3 = 0
+    obsData = list(obsData)
+    modData = list(modData)
+
+    while 1:  # 直到mean算出之前一直筛查
+        if np.isnan(np.mean(obsData)) == False:
+            break
+        for i in obsData:
+            if np.isnan(i) == True:  # 去掉NAN再求平均
+                modData.pop(obsData.index(i))  # 这个必须在前，去除之前找到index
+                obsData.pop(obsData.index(i))
+    # print(len(modData))
+    # print(len(obsData))
+
+    modMean = np.mean(modData)
+    obsMean = np.mean(obsData)
+    N2 = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    for i in range(0, N2):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            continue
+        ALL1 += (modData[i] - modMean) * (obsData[i] - obsMean)
+        ALL2 += (modData[i] - modMean) ** 2
+        ALL3 += (obsData[i] - obsMean) ** 2
+    return ALL1 / np.sqrt(ALL2 * ALL3)
+
+def calcuIOA(modData,obsData):
+    N = len(modData)  # 数据总个数
+    ALL1 = 0
+    ALL2 = 0
+    obsData = list(obsData)
+    modData = list(modData)
+    while 1:  # 直到mean算出之前一直筛查
+        if np.isnan(np.mean(obsData)) == False:
+            break
+        for i in obsData:
+            if np.isnan(i) == True:  # 去掉NAN再求平均
+                modData.pop(obsData.index(i))  # 这个必须在前，去除之前找到index
+                obsData.pop(obsData.index(i))
+    modMean = np.mean(modData)
+    obsMean = np.mean(obsData)
+    N2 = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    for i in range(0, N2):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            continue
+        ALL1 += (modData[i] - obsData[i]) ** 2
+        ALL2 += (abs(modData[i] - obsMean) + abs(obsData[i] - obsMean)) ** 2
+
+    return 1 - ALL1/ALL2
+
+def calcuNMB(modData, obsData):
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    ALL1 = 0
+    ALL2 = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            continue
+        ALL1 += modData[i] - obsData[i]
+        ALL2 += obsData[i]
+    return ALL1 / ALL2
+
+def calcuNME(modData, obsData):
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    ALL1 = 0
+    ALL2 = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            continue
+        ALL1 += abs(modData[i] - obsData[i])
+        ALL2 += obsData[i]
+    return ALL1 / ALL2
+
+def calcuMFE(modData, obsData):
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    ALL = 0
+    A = 0
+    B = 0
+    NAN_count = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            NAN_count += 1
+            continue
+        A = abs(modData[i] - obsData[i])
+        B = obsData[i] + modData[i] / 2
+        ALL += A / B
+    return ALL / (N-NAN_count) * 100
+
+def calcuMFB(modData, obsData):
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    ALL = 0
+    A = 0
+    B = 0
+    NAN_count = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            NAN_count += 1
+            continue
+        A = modData[i] - obsData[i]
+        B = obsData[i] + modData[i] / 2
+        ALL += A / B
+    return ALL / (N-NAN_count) * 100
+
+def calcuFE(modData, obsData):
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    ALL = 0
+    A = 0
+    B = 0
+    NAN_count = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            NAN_count += 1
+            continue
+        A = abs(modData[i] - obsData[i])
+        B = obsData[i] + modData[i]
+        ALL += A / B
+    return ALL * 2 / (N-NAN_count) * 100
+
+def calcuFB(modData, obsData):
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    ALL = 0
+    A = 0
+    B = 0
+    NAN_count = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            NAN_count += 1
+            continue
+        A = modData[i] - obsData[i]
+        B = obsData[i] + modData[i]
+        ALL += A / B
+    return ALL * 2 / (N-NAN_count) * 100
+
+def calcuGE(modData, obsData):
+    N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
+    ALL = 0
+    A = 0
+    B = 0
+    NAN_count = 0
+    for i in range(0, N):
+        if np.isnan(obsData[i]) == True:  # 判断nan
+            NAN_count += 1
+            continue
+        A = modData[i] - obsData[i]
+        B = obsData[i] + modData[i]
+        ALL += abs(A / B)
+    return ALL * 2 / (N-NAN_count) * 100
+
+def missing_hour_fill(incomplete_list):
+    full_list = list(range(24))
+    # incomplete_list = [0, 1, 3, 4, 5, 10, 15, 23]  # 示例不完整列表
+    incomplete_array = np.array(incomplete_list)
+    result_array = np.full(len(full_list), np.nan)
+    result_array[incomplete_array] = incomplete_array
+    return result_array
 
 def getNearestPos(station_lat, station_lon, XLAT, XLONG):
     """
@@ -34,13 +229,23 @@ def getNearestPos(station_lat, station_lon, XLAT, XLONG):
 
     return ind
 
-def generate_date_list(start_date: datetime, n: int) -> list:
+def generate_date_list(start_date_str,n):
+    start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d')
     """从 start_date 开始，生成 n 天的日期列表"""
     return [start_date + datetime.timedelta(days=i) for i in range(n)]
 
+def generate_date_list_withhour(start_date_str,n):
+    start_date_str += ' 00:00'
+    start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d %H:%M')
+    date_list = []
+    for i in range(n+1):  # 包括起始时间，所以是 745
+        current_date = start_date + datetime.timedelta(hours=i)
+        date_list.append(current_date.strftime('%Y-%m-%d %H:%M'))
+    return date_list
+
 def getAirStationsFromLatLon(uplat, downlat, leftlon, rightlon, station_info_csv=""):
     """
-    从站点信息xls文件中，返回在某一个矩形经纬度范围内的站点信息，格式为验证代码中的字典格式
+    从站点信息csv文件中，返回在某一个矩形经纬度范围内的站点信息，格式为验证代码中的字典格式
     :param uplat:
     :param downlat:
     :param leftlon:
@@ -49,45 +254,51 @@ def getAirStationsFromLatLon(uplat, downlat, leftlon, rightlon, station_info_csv
     """
     # airStation_infofile_dir = r"E:\全国空气质量\_站点列表\站点信息2016起.xls"
     airStation_infofile_dir = station_info_csv
-    airStation_infofile = xlrd.open_workbook(airStation_infofile_dir)  # 修复了8月10日气象站数据有确实的问题，导致了绘图的错误
-    sheet = airStation_infofile.sheet_by_index(0)
+    airStation_infofile = pd.read_csv(airStation_infofile_dir)
     airStations = {}
 
-    for line in range(1, sheet.nrows):
-        stationinfo = sheet.row_values(line, 0, 5)
-        if stationinfo[3] != '':
-            if leftlon < float(stationinfo[3]) < rightlon and downlat < float(stationinfo[4]) < uplat:
-                airStations.update({stationinfo[1]: [float(stationinfo[3]), float(stationinfo[4]), stationinfo[0],stationinfo[2]]})
+    filtered_rows = airStation_infofile[(leftlon < airStation_infofile['经度'] < rightlon) & (downlat < airStation_infofile['纬度'] < uplat)]
+
+    for row in filtered_rows:
+        airStations.update({airStation_infofile.at[row,'监测点名称']:
+                                [float(airStation_infofile.at[row,'经度']),
+                                 float(airStation_infofile.at[row,'纬度']),
+                                 airStation_infofile.at[row,'监测点编码'],
+                                 airStation_infofile.at[row,'城市']]})
                                         # 数据格式：站点名：经度 纬度 站点代号 所在城市
     return airStations
 
 def CMAQ_site_validation(
-    start_date='YYYY-MM-DD', # 验证的开始时期，确定观测值数据获取
-    daycount=5, # 验证持续时间，
-    simdata_inithour=16, # 模拟值数据列表的起始位置，由于模拟数据为utc0，则以第16为数组的开始位置才能完整的取到一天，可修改
+    start_date='YYYY-MM-DD',
+    daycount=5, #
+    simdata_inithour=16, #
     GRIDCRO2D_file_dir = "",
     Combine_file_dir = "",
-    target_substances = [], # 目标污染物，若输入多个，则是几个污染物类型的和，如不同ISAMtag相加的总量
-    target_substance_obs = '', # 观测数据中的污染物名称，用于获取，不同于CMAQ的输出nc，一般验证只会获取一类
-    Molar_mass = 0, # ppm为单位的物质的摩尔质量，为0时则不进行转换，如PM2.5，直接为ug
+    target_substances = [], #
+    target_substance_obs = '', #
+    Molar_mass = 0, #
     airstation_files_dir = "",
     airstation_infofile_dir = "",
-    out_dir = "",
-    result_csv_name = "",
-    suffix = ""
+    out_dir = "", #
+    result_csv_name = "", #
+    suffix = "",
 ):
     """
     使用全国公开csv逐小时基本污染物逐小时浓度数据验证CAMQ模拟结果
-    :param start_date:
-    :param daycount:
-    :param GRIDCRO2D_file_dir:
-    :param Combine_file_dir:
-    :param target_substances:
-    :param airstation_files_dir:
-    :param airstation_infofile_dir:
-    :param out_dir:
-    :param result_csv_name:
-    :param suffix:
+
+    :param start_date: 验证的开始时期，确定观测值数据获取
+    :param daycount: 验证持续天数
+    :param simdata_inithour: 模拟值数据列表的起始位置，由于模拟数据为utc0，则以第16为数组的开始位置才能完整的取到一天，可修改
+    :param GRIDCRO2D_file_dir: CMAQ目标验证domian的任意GRIDCRO2D文件
+    :param Combine_file_dir:  CMAQ包含最终目标物质浓度的combine后文件
+    :param target_substances: 目标污染物，若输入多个，则是几个污染物类型的和，如不同ISAMtag相加的总量
+    :param target_substance_obs: 观测数据中的污染物名称，用于获取，不同于CMAQ的输出nc，一般验证只会获取一类
+    :param Molar_mass: ppm为单位的物质的摩尔质量，为0时则不进行转换，如PM2.5，直接为ug
+    :param airstation_files_dir: 包含观测站数据的csv文件所在文件夹
+    :param airstation_infofile_dir: 包含观测站信息的csv文件路径
+    :param out_dir: 验证结果输出的文件夹
+    :param result_csv_name: 包含验证参数计算结果的输出csv文件名称
+    :param suffix: 验证过程后缀，用于区分
     :return:
     """
     year = str(datetime.datetime.strptime(start_date, '%Y-%m-%d')).split('-')[0] # 年份
@@ -114,8 +325,8 @@ def CMAQ_site_validation(
         airStation_csv_list.append(f"{airstation_files_dir}china_sites_{filedate}.csv")
 
 
-    xls_write_num = -1  # 写入xls的验证参数的行，数据有效的时候才+1，否则会有空行
-    for airstation in airStation_locations.values(): # 从站点列表处理每一个站点
+    csv_row = 1 # csv非表头的第1行开始写入
+    for airstation in tqdm(airStation_locations.values(),desc='处理所有有效站点...'): # 从站点列表处理每一个站点
         stname = list(airStation_locations.keys())[list(airStation_locations.values()).index(airstation)]  # 通过值k获取字典dic对应键的公式： list(dic.keys())[list(dic.values()).index(k)]
         # 读取经纬度与网格关系数据
         CMAQXLAT = np.array(GRIDCRO2D.variables['LAT'][:][0])
@@ -124,7 +335,6 @@ def CMAQ_site_validation(
         nearlat = nearpos[1]  # 与WRF获取最近点不同
         nearlon = nearpos[2]
 
-        pollution1_station_pre = []
         subdata_shape = np.array(CMAQoutf.variables[target_substances[0]][:]).shape  # 获得数据shape来存放all
         substance = np.zeros(subdata_shape,'float64')
         for sub in target_substances:
@@ -132,88 +342,38 @@ def CMAQ_site_validation(
         target = substance[:, 0, nearlat, nearlon]
         if Molar_mass != 0 : target = target * Molar_mass / 22.4 * 1000
         substance_station = target
-        pollution1_pre = substance_station
-
-        # 计算24h滑动平均
-        # pollution1 = []
-        # for x in range(16,760):
-        #     moving_avg_list = substance_station[x-12:x+12]
-        #     pollution1.append(np.mean(moving_avg_list))
-
-        # 计算日均值或几个小时的均值
-        # pollution1 = []
-        # for x in range(16, 760,24):
-        #     day_avg_list = substance_station[x:x + 24]
-        #     pollution1.append(np.mean(day_avg_list))
-
-        # pollution1 = substance_station[16:760]   # 得到UTC+8后的8月1-8月31
         pollution1 = substance_station[simdata_inithour:simdata_inithour+24*daycount]  # 得到UTC+8后的8月1-8月31
-        # pollution1 = substance_station[0:744]   # 得到UTC+8后的8月1-8月31
-        # print('污染物列表的长度：   ', len(pollution1))
-        # print(pollution1)
 
         # 读取观测值csv列表来获取整个观测值数组
+        pollution1_station_pre = []
         for m in airStation_csv_list:
             airStation_csv = pd.read_csv(m)
-            target_col = airStation_csv.columns.get_loc(airstation[2])# 找出站点代号所在的列
-            matching_rows = airStation_csv[airStation_csv[target_col] == target_substance_obs] # 获取对应物质所在列
-            pollution1_station_pre = airStation_csv.loc[matching_rows, target_col]
-            pollution1_station_pre = pollution1_station_pre.replace('', np.nan).astype(int).tolist()
+            matching_rows = airStation_csv[airStation_csv['type'] == target_substance_obs] # 获取对应物质所在列
+            matching_hours = airStation_csv.loc[matching_rows, 'hour'].astype(int) # 查看有哪些小时
+            fill_hours = list(missing_hour_fill(matching_hours))
+            for hour in fill_hours: # 检测从某日csv文件获取的是否有缺失小时，有则顺序补充nan
+                if hour == np.nan:
+                    pollution1_station_pre.append(np.nan)
+                else:
+                    target_row = airStation_csv[(airStation_csv['hour'] == hour) & (airStation_csv['type'] == target_substance_obs)]
+                    pollution1_station_pre.append(target_row[airstation[2]].values[0])
 
-            # print(pollution1_station)
-            # print('list长度：   ', len(pollution1_station))
+            # pollution1_station_pre1 = airStation_csv.loc[matching_rows, target_col]
+            # pollution1_station_pre += pollution1_station_pre1.replace('', np.nan).astype(int).tolist()
 
-        # 判断站点数据是否是全空的
+        # 判断站点数据是否是全空的，是则跳过对这个站点的结果输出
         # print((np.isnan(np.array(pollution1_station))).all())
         if (np.isnan(np.array(pollution1_station_pre))).all():
             continue
-        xls_write_num += 1
 
         pollution1_station = pollution1_station_pre  # 原始小时值情形
-
-        # 某h均值计算情形
-        # pollution1_station = []
-        # for x in range(0, 744, 24):
-        #     day_avg_list = pollution1_station_pre[x:x + 24]
-        #     day_avg_list_nonan = []
-        #     for i in day_avg_list:
-        #         if np.isnan(i) == False:
-        #             day_avg_list_nonan.append(i)
-        #     pollution1_station.append(np.mean(day_avg_list_nonan))
-
-        # 某h滑动均值计算情形
-        # pollution1_station = []
-        # for x in range(16, 760):
-        #     day_avg_list = pollution1_station_pre[x-12:x + 12]
-        #     day_avg_list_nonan = []
-        #     for i in day_avg_list:
-        #         if np.isnan(i) == False:
-        #             day_avg_list_nonan.append(i)
-        #     pollution1_station.append(np.mean(day_avg_list_nonan))
 
         plt.rcParams['font.sans-serif'] = ['Times New Roman']
         fig2 = plt.figure(figsize=(5, 2), dpi=200)
 
-        xdate = []  # 生成对应的时间序列，否则横坐标无法正常转化为日期 744小时
-        for x in range(1, 10):
-            for b in range(0, 10):
-                xdate.append(
-                    datetime.datetime.strptime(year + '-01-' + '0' + str(x) + '-' + '0' + str(b), '%Y-%m-%d-%H'))
-            for b in range(10, 24):
-                xdate.append(datetime.datetime.strptime(year + '-01-' + '0' + str(x) + '-' + str(b), '%Y-%m-%d-%H'))
-        for x in range(10, 32):
-            for b in range(0, 10):
-                xdate.append(datetime.datetime.strptime(year + '-01-' + str(x) + '-' + '0' + str(b), '%Y-%m-%d-%H'))
-            for b in range(10, 24):
-                xdate.append(datetime.datetime.strptime(year + '-01-' + str(x) + '-' + str(b), '%Y-%m-%d-%H'))
+        xdate = generate_date_list_withhour(start_date,daycount*24)
 
-        # xdate = []  # 生成对应的时间序列，否则横坐标无法正常转化为日期 31天 日均
-        # for x in range(1, 10):
-        #     xdate.append(datetime.datetime.strptime(year + '-01-' + '0' + str(x), '%Y-%m-%d'))
-        # for x in range(10, 32):
-        #     xdate.append(datetime.datetime.strptime(year + '-01-' + str(x), '%Y-%m-%d'))
-
-        print('两者长度比较 ：   ', len(pollution1_station), len(pollution1))
+        # print('两者长度比较 ：   ', len(pollution1_station), len(pollution1))
         ax2 = fig2.add_subplot(111)
         Hour = range(1, len(pollution1_station))  # 横坐标，初始为小时
         line1, = ax2.plot(xdate, pollution1_station, linewidth=0.5, label='Obs', color='#258080')  # 要用legend画图例，这里必须,=
@@ -229,30 +389,36 @@ def CMAQ_site_validation(
         """
         计算精度系数
         """
-        substanceMAE = WCt.calcuMAE(pollution1, pollution1_station)
-        substanceR = WCt.calcuR(pollution1, pollution1_station)
-        substanceIOA = WCt.calcuIOA(pollution1, pollution1_station)
-        substanceNMB = WCt.calcuNMB(pollution1, pollution1_station)
-        substanceNME = WCt.calcuNME(pollution1, pollution1_station)
-        # substanceMFE = WCt.calcuMFE(pollution1, pollution1_station)
-        # substanceMFB = WCt.calcuMFB(pollution1, pollution1_station)
-        substanceFE = WCt.calcuFE(pollution1, pollution1_station)
-        substanceFB = WCt.calcuFB(pollution1, pollution1_station)
-        sheet.write(xls_write_num + 1, 0, stname)
-        sheet.write(xls_write_num + 1, 1, substanceMAE)
-        sheet.write(xls_write_num + 1, 2, substanceR)
-        sheet.write(xls_write_num + 1, 3, substanceIOA)
-        sheet.write(xls_write_num + 1, 4, substanceNMB)
-        sheet.write(xls_write_num + 1, 5, substanceNME)
-        sheet.write(xls_write_num + 1, 6, substanceFE)
-        sheet.write(xls_write_num + 1, 7, substanceFB)
-        sheet.write(xls_write_num + 1, 8, k[1])
-        sheet.write(xls_write_num + 1, 9, k[0])
-        sheet.write(xls_write_num + 1, 10, k[3])
-        plt.savefig(out_dir + k[3] + suffix)  # 不以站点名命名，以所在区县命名
+        substanceMAE = calcuMAE(pollution1, pollution1_station)
+        substanceR = calcuR(pollution1, pollution1_station)
+        substanceIOA = calcuIOA(pollution1, pollution1_station)
+        substanceNMB = calcuNMB(pollution1, pollution1_station)
+        substanceNME = calcuNME(pollution1, pollution1_station)
+        substanceMFE = calcuMFE(pollution1, pollution1_station)
+        substanceMFB = calcuMFB(pollution1, pollution1_station)
+        substanceFE = calcuFE(pollution1, pollution1_station)
+        substanceFB = calcuFB(pollution1, pollution1_station)
+        result_csv_data.at[csv_row, '站点'] = stname
+        result_csv_data.at[csv_row, 'MAE'] = substanceMAE
+        result_csv_data.at[csv_row, 'R'] = substanceR
+        result_csv_data.at[csv_row, 'IOA'] = substanceIOA
+        result_csv_data.at[csv_row, 'NMB'] = substanceNMB
+        result_csv_data.at[csv_row, 'NME'] = substanceNME
+        result_csv_data.at[csv_row, 'MFE'] = substanceMFE
+        result_csv_data.at[csv_row, 'MFB'] = substanceMFB
+        result_csv_data.at[csv_row, 'FE'] = substanceFE
+        result_csv_data.at[csv_row, 'FB'] = substanceFB
+        result_csv_data.at[csv_row, '站点经度'] = airstation[1]
+        result_csv_data.at[csv_row, '站点纬度'] = airstation[0]
+        result_csv_data.at[csv_row, '城市'] = airstation[3]
+        csv_row += 1
+        plt.savefig(f'{out_dir}{airstation[1]}_{suffix}.png')
 
-    Xfile.save(result_xls_name)
+    result_csv_data.to_csv(f'{out_dir}{result_csv_name}_{suffix}.csv')
 
 
 if __name__ == '__main__':
+    # CMAQ_site_validation(
+    #     start_date=
+    # )
     pass
