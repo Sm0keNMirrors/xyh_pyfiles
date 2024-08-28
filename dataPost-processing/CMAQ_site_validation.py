@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib
 import netCDF4 as nc
 from tqdm import tqdm
 
@@ -235,12 +236,12 @@ def generate_date_list(start_date_str,n):
     return [start_date + datetime.timedelta(days=i) for i in range(n)]
 
 def generate_date_list_withhour(start_date_str,n):
-    start_date_str += ' 00:00'
-    start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d %H:%M')
+    start_date_str += '-00'
+    start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d-%H')
     date_list = []
     for i in range(n+1):  # 包括起始时间，所以是 745
         current_date = start_date + datetime.timedelta(hours=i)
-        date_list.append(current_date.strftime('%Y-%m-%d %H:%M'))
+        date_list.append(current_date)
     return date_list
 
 def getAirStationsFromLatLon(uplat, downlat, leftlon, rightlon, station_info_csv=""):
@@ -257,9 +258,19 @@ def getAirStationsFromLatLon(uplat, downlat, leftlon, rightlon, station_info_csv
     airStation_infofile = pd.read_csv(airStation_infofile_dir)
     airStations = {}
 
-    filtered_rows = airStation_infofile[(leftlon < airStation_infofile['经度'] < rightlon) & (downlat < airStation_infofile['纬度'] < uplat)]
+    # 去掉经纬度信息不符合规则的站点
+    airStation_infofile['经度'] = pd.to_numeric(airStation_infofile['经度'], errors='coerce')
+    airStation_infofile['纬度'] = pd.to_numeric(airStation_infofile['纬度'], errors='coerce')
+    filtered_rows = airStation_infofile[
+        (airStation_infofile['经度'].notna()) &
+        (airStation_infofile['纬度'].notna())
+        ]
 
-    for row in filtered_rows:
+    final_filtered_rows  = filtered_rows[
+        (filtered_rows['经度'] > leftlon) & (filtered_rows['经度'] < rightlon) &
+        (filtered_rows['纬度'] > downlat) & (filtered_rows['纬度'] < uplat)
+        ]
+    for row in final_filtered_rows.index.tolist():
         airStations.update({airStation_infofile.at[row,'监测点名称']:
                                 [float(airStation_infofile.at[row,'经度']),
                                  float(airStation_infofile.at[row,'纬度']),
@@ -306,6 +317,8 @@ def CMAQ_site_validation(
     CMAQoutISAMCombine_file_dir = Combine_file_dir  # 合并后的污染物浓度文件
     # airStation_file_dir = f"{airstation_files_dir}\\站点_{year}0101-{year}1231\\"  # 目标天的空气质量站点数据所在文件夹
     if os.path.exists(out_dir) is False: os.mkdir(out_dir)
+    matplotlib.rcParams['font.sans-serif'] = ['SimHei']  # 使用黑体
+    matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
 
     GRIDCRO2D = nc.Dataset(CMAQGRIDCRO2D_file_dir)
     CMAQoutf = nt.Dataset(CMAQoutISAMCombine_file_dir, "r")  # 打开CMAQ输出的NC格式文件
@@ -319,9 +332,10 @@ def CMAQ_site_validation(
     result_csv_data = pd.DataFrame(columns=labels) # 创建记录结果的csv
 
     airStation_csv_list = [] # 验证时间内的所有csv
-    validation_dates = generate_date_list(datetime.datetime.strptime(start_date, '%Y-%m-%d'),daycount)
+    validation_dates = generate_date_list(start_date,daycount)
     for date in validation_dates:
-        filedate = f'{str(date).split("-")[0]}{str(date).split("-")[1]}{str(date).split("-")[2]}'
+        date2 = str(date).split(' ')[0]
+        filedate = f'{date2.split("-")[0]}{date2.split("-")[1]}{date2.split("-")[2]}'
         airStation_csv_list.append(f"{airstation_files_dir}china_sites_{filedate}.csv")
 
 
@@ -348,7 +362,7 @@ def CMAQ_site_validation(
         pollution1_station_pre = []
         for m in airStation_csv_list:
             airStation_csv = pd.read_csv(m)
-            matching_rows = airStation_csv[airStation_csv['type'] == target_substance_obs] # 获取对应物质所在列
+            matching_rows = airStation_csv[airStation_csv['type'] == target_substance_obs].index.tolist() # 获取对应物质所在列
             matching_hours = airStation_csv.loc[matching_rows, 'hour'].astype(int) # 查看有哪些小时
             fill_hours = list(missing_hour_fill(matching_hours))
             for hour in fill_hours: # 检测从某日csv文件获取的是否有缺失小时，有则顺序补充nan
@@ -356,8 +370,10 @@ def CMAQ_site_validation(
                     pollution1_station_pre.append(np.nan)
                 else:
                     target_row = airStation_csv[(airStation_csv['hour'] == hour) & (airStation_csv['type'] == target_substance_obs)]
-                    pollution1_station_pre.append(target_row[airstation[2]].values[0])
-
+                    if airstation[2] in airStation_csv.columns: # 判断目标站点是否存在，不存在添加空值
+                        pollution1_station_pre.append(target_row[airstation[2]].values[0])
+                    else:
+                        pollution1_station_pre.append(np.nan)
             # pollution1_station_pre1 = airStation_csv.loc[matching_rows, target_col]
             # pollution1_station_pre += pollution1_station_pre1.replace('', np.nan).astype(int).tolist()
 
@@ -368,24 +384,22 @@ def CMAQ_site_validation(
 
         pollution1_station = pollution1_station_pre  # 原始小时值情形
 
-        plt.rcParams['font.sans-serif'] = ['Times New Roman']
         fig2 = plt.figure(figsize=(5, 2), dpi=200)
-
         xdate = generate_date_list_withhour(start_date,daycount*24)
-
-        # print('两者长度比较 ：   ', len(pollution1_station), len(pollution1))
+        xdate.pop() # 会多一个h
         ax2 = fig2.add_subplot(111)
-        Hour = range(1, len(pollution1_station))  # 横坐标，初始为小时
         line1, = ax2.plot(xdate, pollution1_station, linewidth=0.5, label='Obs', color='#258080')  # 要用legend画图例，这里必须,=
         line2, = ax2.plot(xdate, pollution1, linewidth=0.5, label='Sim', color='red')
-        ax2.set_ylabel('PM2.5 Concentration', fontsize=5)
-        ax2.set_xlabel('Date', fontsize=5)
-        plt.title('PM2.5 Concentration', fontsize=5)
+        ax2.set_ylabel('μg/m$^{3}$', fontsize=10)
+        ax2.set_xlabel('Date', fontsize=10)
+        plt.title(f'{target_substance_obs} Concentration validation at site {stname}', fontsize=10)
         plt.xticks(fontsize=5)  # xticks必须在这个位置才生效
         plt.yticks(fontsize=5)
         ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))  # 设置不显示年份
         plt.legend((line1, line2), ('Obs', 'Sim'), loc='upper right', frameon=False, framealpha=0.5,
                    fontsize=5)
+        plt.savefig(f'{out_dir}{stname}_{suffix}.png')
+        plt.close()
         """
         计算精度系数
         """
@@ -412,13 +426,25 @@ def CMAQ_site_validation(
         result_csv_data.at[csv_row, '站点纬度'] = airstation[0]
         result_csv_data.at[csv_row, '城市'] = airstation[3]
         csv_row += 1
-        plt.savefig(f'{out_dir}{airstation[1]}_{suffix}.png')
 
-    result_csv_data.to_csv(f'{out_dir}{result_csv_name}_{suffix}.csv')
+
+    result_csv_data.to_csv(f'{out_dir}{result_csv_name}_{suffix}.csv',encoding='utf-8')
 
 
 if __name__ == '__main__':
-    # CMAQ_site_validation(
-    #     start_date=
-    # )
+    CMAQ_site_validation(
+        start_date='2020-08-01',
+        daycount=30,
+        simdata_inithour=16,
+        GRIDCRO2D_file_dir="E:\Emission_update\GRIDCRO2D_2020213.nc",
+        Combine_file_dir="E:\Emission_update\CD202008_MEIAT-IA_d03_combine_PM2503_IAave.nc",
+        target_substances=['O3'],
+        target_substance_obs='O3',
+        Molar_mass=48,
+        airstation_files_dir=r'E:\全国空气质量\全国站点小时浓度csv_files\\',
+        airstation_infofile_dir="E:\全国空气质量\_站点列表\站点列表-2022.02.13起.csv",
+        out_dir=r'E:\Emission_update\\validation\\',
+        result_csv_name='validationPara',
+        suffix='IAave'
+    )
     pass
