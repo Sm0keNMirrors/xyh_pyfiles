@@ -8,6 +8,8 @@ import matplotlib.dates as mdates
 import matplotlib
 import netCDF4 as nc
 from tqdm import tqdm
+from sklearn.linear_model import LinearRegression
+from scipy.stats import gaussian_kde
 
 
 def calcuRSME(modData, obsData):
@@ -290,6 +292,7 @@ def CMAQ_site_validation(
     Molar_mass = 0, #
     airstation_files_dir = "",
     airstation_infofile_dir = "",
+    result_pic_types=[],
     out_dir = "", #
     result_csv_name = "", #
     suffix = "",
@@ -307,6 +310,7 @@ def CMAQ_site_validation(
     :param Molar_mass: ppm为单位的物质的摩尔质量，为0时则不进行转换，如PM2.5，直接为ug
     :param airstation_files_dir: 包含观测站数据的csv文件所在文件夹
     :param airstation_infofile_dir: 包含观测站信息的csv文件路径
+    :param result_pic_types: 输出哪些类型的结果图，'line'：双折线图，'scatter':散点回归线图
     :param out_dir: 验证结果输出的文件夹
     :param result_csv_name: 包含验证参数计算结果的输出csv文件名称
     :param suffix: 验证过程后缀，用于区分
@@ -381,25 +385,60 @@ def CMAQ_site_validation(
         # print((np.isnan(np.array(pollution1_station))).all())
         if (np.isnan(np.array(pollution1_station_pre))).all():
             continue
-
         pollution1_station = pollution1_station_pre  # 原始小时值情形
 
-        fig2 = plt.figure(figsize=(5, 2), dpi=200)
-        xdate = generate_date_list_withhour(start_date,daycount*24)
-        xdate.pop() # 会多一个h
-        ax2 = fig2.add_subplot(111)
-        line1, = ax2.plot(xdate, pollution1_station, linewidth=0.5, label='Obs', color='#258080')  # 要用legend画图例，这里必须,=
-        line2, = ax2.plot(xdate, pollution1, linewidth=0.5, label='Sim', color='red')
-        ax2.set_ylabel('μg/m$^{3}$', fontsize=10)
-        ax2.set_xlabel('Date', fontsize=10)
-        plt.title(f'{target_substance_obs} Concentration validation at site {stname}', fontsize=10)
-        plt.xticks(fontsize=5)  # xticks必须在这个位置才生效
-        plt.yticks(fontsize=5)
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))  # 设置不显示年份
-        plt.legend((line1, line2), ('Obs', 'Sim'), loc='upper right', frameon=False, framealpha=0.5,
-                   fontsize=5)
-        plt.savefig(f'{out_dir}{stname}_{suffix}.png')
-        plt.close()
+
+        #绘制不同类型的结果图
+        if 'line' in result_pic_types:
+            if os.path.exists(f'{out_dir}pics_line\\') is False: os.mkdir(f'{out_dir}pics_line\\')
+            fig2 = plt.figure(figsize=(5, 2), dpi=200)
+            xdate = generate_date_list_withhour(start_date,daycount*24)
+            xdate.pop() # 会多一个h
+            ax2 = fig2.add_subplot(111)
+            line1, = ax2.plot(xdate, pollution1_station, linewidth=0.5, label='Obs', color='#258080')  # 要用legend画图例，这里必须,=
+            line2, = ax2.plot(xdate, pollution1, linewidth=0.5, label='Sim', color='red')
+            ax2.set_ylabel('μg/m$^{3}$', fontsize=10)
+            ax2.set_xlabel('Date', fontsize=10)
+            plt.title(f'{target_substance_obs} Concentration validation at site {stname}', fontsize=10)
+            plt.xticks(fontsize=5)  # xticks必须在这个位置才生效
+            plt.yticks(fontsize=5)
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))  # 设置不显示年份
+            plt.legend((line1, line2), ('Obs', 'Sim'), loc='upper right', frameon=False, framealpha=0.5,
+                       fontsize=5)
+            plt.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png')
+            plt.close()
+        if 'scatter' in result_pic_types:
+            if os.path.exists(f'{out_dir}pics_scatter\\') is False: os.mkdir(f'{out_dir}pics_scatter\\')
+            plt.figure(figsize=(6, 6) ,dpi=200)
+            observed = np.array(pollution1_station)
+            simulated = np.array(pollution1) # 转为数组后才能进行掩码处理
+            # 去除 NaN 值
+            mask = ~np.isnan(observed)  # 创建一个掩码，选择观测值不是 NaN 的索引
+            observed_clean = observed[mask]
+            simulated_clean = simulated[mask]
+            xy = np.vstack([observed_clean, simulated_clean])
+            z = gaussian_kde(xy)(xy)
+            scatter = plt.scatter(observed_clean, simulated_clean, c=z, cmap='viridis', alpha=0.6)
+            model = LinearRegression()
+            model.fit(observed_clean.reshape(-1, 1), simulated_clean)
+            x_fit = np.linspace(min(observed_clean), max(observed_clean), 100).reshape(-1, 1)
+            y_fit = model.predict(x_fit)
+            slope = model.coef_[0]
+            intercept = model.intercept_
+            equation = f'y = {slope:.2f}x + {intercept:.2f}'
+            # plt.text(0.9 * max(observed_clean), 0.9 * max(simulated_clean), equation, fontsize=12, color='red',
+            #          ha='center', transform=plt.gca().transAxes)
+            plt.plot(x_fit, y_fit, color='red', linewidth=2, label=equation)
+            # cbar = plt.colorbar(scatter)
+            # cbar.set_label('scatter density')
+            plt.xlabel('Obs')
+            plt.ylabel('Mod')
+            plt.title(f'Scatter and regression line at site {stname}')
+            plt.legend()
+            # plt.grid()
+
+            plt.savefig(f'{out_dir}pics_scatter\\{stname}_{suffix}.png')
+            plt.close()
         """
         计算精度系数
         """
@@ -443,6 +482,7 @@ if __name__ == '__main__':
         Molar_mass=48,
         airstation_files_dir=r'E:\全国空气质量\全国站点小时浓度csv_files\\',
         airstation_infofile_dir="E:\全国空气质量\_站点列表\站点列表-2022.02.13起.csv",
+        result_pic_types=['line','scatter'],
         out_dir=r'E:\Emission_update\\validation\\',
         result_csv_name='validationPara',
         suffix='IAave'
