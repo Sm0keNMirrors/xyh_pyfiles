@@ -409,7 +409,8 @@ def WRF_site_validation(
     )
 
     # 转换气象站数据格式为易处理的csv
-    for metstation in tqdm(metstations,desc="转换气象站数据格式为易处理的csv"):
+    print('转换气象站数据格式为易处理的csv:')
+    for metstation in metstations:
         metinfo = metstations[metstation]
         filename = f'{metinfo[2]}-99999-{str(input_year)}'
         outfilename = f'{metstation}-{str(input_year)}'
@@ -422,7 +423,6 @@ def WRF_site_validation(
     para_data_WS = pd.DataFrame(columns=labels)
     para_data_WD = pd.DataFrame(columns=labels)
 
-    print('气象验证进行中...')
     csv_row = 1 # csv非表头的第1行开始写入
     for station in tqdm(metstations,desc='输出每个站点的验证结果表和图'):
         stname = station
@@ -480,7 +480,6 @@ def WRF_site_validation(
         target_row = meteoStation_csv[(meteoStation_csv['年份'] == float(input_year)) &
                                       (meteoStation_csv['月'] == float(target_month)) &
                                       (meteoStation_csv['日'] == float(target_day))].index[0]
-        print(target_row)
         target_T2 = np.array(meteoStation_csv['温度'].iloc[target_row:target_row + daycount*24])
         target_T2[target_T2 == -9999] = np.nan
         target_T2 /= 10 # 处理scale
@@ -595,6 +594,8 @@ def WRF_site_validation(
             substanceMFB = calcuMFB(final_datas[data][0], final_datas[data][1])
             para_data_target.at[csv_row, '站点'] = stname
             para_data_target.at[csv_row, 'MAE'] = substanceMAE
+            para_data_target.at[csv_row, 'RSME'] = substanceRSME
+            para_data_target.at[csv_row, 'MB'] = substanceMB
             para_data_target.at[csv_row, 'R'] = substanceR
             para_data_target.at[csv_row, 'NMB'] = substanceNMB
             para_data_target.at[csv_row, 'NME'] = substanceNME
