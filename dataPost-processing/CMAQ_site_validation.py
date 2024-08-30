@@ -1,5 +1,4 @@
 import datetime
-import netCDF4 as nt
 import os
 import numpy as np
 import pandas as pd
@@ -325,7 +324,7 @@ def CMAQ_site_validation(
     matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
 
     GRIDCRO2D = nc.Dataset(CMAQGRIDCRO2D_file_dir)
-    CMAQoutf = nt.Dataset(CMAQoutISAMCombine_file_dir, "r")  # 打开CMAQ输出的NC格式文件
+    CMAQoutf = nc.Dataset(CMAQoutISAMCombine_file_dir, "r")  # 打开CMAQ输出的NC格式文件
     var_lon = np.array(GRIDCRO2D.variables['LON'][:][0])
     var_lat = np.array(GRIDCRO2D.variables['LAT'][:][0])
     lonmin, latmax, lonmax, latmin = (var_lon.min(), var_lat.max(),
