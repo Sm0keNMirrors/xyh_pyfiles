@@ -337,9 +337,8 @@ def isdsite_metdata_select(
         metstations.update({metstations_infofile.at[row, 'name']:
                                 [float(metstations_infofile.at[row, 'Lon']),
                                  float(metstations_infofile.at[row, 'Lat']),
-                                 metstations_infofile.at[row, 'stationid']]})
+                                 f'{metstations_infofile.at[row, "stationid"]}0']}) # 站点信息文件的id相较于数据文件少了个0
         # 数据格式：站点名：经度 纬度 站点代号
-
     metdatas = os.listdir(metdata_dir)
     metdatas_year = [x for x in metdatas if x.split('-')[2] == year] # 筛选目标年份
     metdatas_id = [x.split('-')[0] for x in metdatas_year] # 筛选有数据的站点
@@ -355,9 +354,6 @@ def isdsite_metdata_select(
     for m in metstations_keytodel:
         del metstations[m]
 
-    # 没在站点位置文件的统计中，但属于四川盆地且文件中存在的两个气象站，手动添加：
-    metstations.update({'成都':['104.02', '30.67',562940]})
-    # metstations.update({'南充': ['106.08', '30.78', 574110]})
 
     return metstations
 
@@ -407,6 +403,9 @@ def WRF_site_validation(
         metstation_files_dir=metstation_files_dir,
         metstation_infofile_dir=metstation_infofile_dir,
     )
+    # 没在站点位置文件的统计中，但属于四川盆地且文件中存在的两个气象站，手动添加：
+    metstations.update({'成都':['104.02', '30.67',562940]})
+    # metstations.update({'南充': ['106.08', '30.78', 574110]})
 
     # 转换气象站数据格式为易处理的csv
     print('转换气象站数据格式为易处理的csv:')
@@ -470,8 +469,6 @@ def WRF_site_validation(
                 WD_WRF += list(WD[:, nearlat, nearlon])
             WRFoutf.close()
 
-            # print('温度：   ', T2_station)
-
         meteoStation_csv_dir = f"{out_dir}{stname}-{str(input_year)}.csv"
         meteoStation_csv = pd.read_csv(meteoStation_csv_dir)  # 修复了8月10日气象站数据有确实的问题，导致了绘图的错误
         target_month = start_date.split('-')[1]
@@ -496,11 +493,6 @@ def WRF_site_validation(
         target_WS /= 10 # 处理scale
         target_meteoStationData.update({'风速': target_WS})
 
-        # print(target_meteoStationData['温度'])
-        # print(target_meteoStationData['露点温度'])
-        # print(target_meteoStationData['风速'])
-        # print(target_meteoStationData['风向'])
-
         # 气象站数据计算相对湿度
         T2_st = target_meteoStationData['温度']
         DewT_st = target_meteoStationData['露点温度']
@@ -516,14 +508,6 @@ def WRF_site_validation(
         WS_st[WS_st <= -10] = None
         WD_st = np.array(target_meteoStationData['风向'])
         WD_st[WD_st <= -10] = None
-
-        # print('相对湿度，观测值:   ', RH_st)
-        #
-        # print('list长度：   ',len(T2_station))
-
-        # k.append(pollution1) # 气象站字典的列表里再加一个污染物字典
-
-        fig2 = plt.figure(figsize=(5, 2), dpi=200)
 
         final_datas = {'T2':[T2_WRF,T2_st],'RH':[RH_WRF,RH_st],'WS':[WS_WRF,WS_st],'WD':[WD_WRF,WD_st]}
 
