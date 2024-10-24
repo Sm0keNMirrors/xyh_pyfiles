@@ -373,7 +373,8 @@ def CMAQ_site_validation(
                     pollution1_station_pre.append(np.nan)
                 else:
                     target_row = airStation_csv[(airStation_csv['hour'] == hour) & (airStation_csv['type'] == target_substance_obs)]
-                    if airstation[2] in airStation_csv.columns: # 判断目标站点是否存在，不存在添加空值
+                    # print(target_row[airstation[2]].values)
+                    if airstation[2] in airStation_csv.columns and np.array(target_row[airstation[2]]).size > 0 : # 判断目标站点是否存在，不存在添加空值
                         pollution1_station_pre.append(target_row[airstation[2]].values[0])
                     else:
                         pollution1_station_pre.append(np.nan)
@@ -470,20 +471,55 @@ def CMAQ_site_validation(
 
 
 if __name__ == '__main__':
-    CMAQ_site_validation(
-        start_date='2020-08-01',
-        daycount=30,
+    # CMAQ_site_validation(
+    #     start_date='2020-08-01',
+    #     daycount=30,
+    #     simdata_inithour=16,
+    #     GRIDCRO2D_file_dir="E:\Emission_update\GRIDCRO2D_2020213.nc",
+    #     Combine_file_dir="E:\Emission_update\CD202008_MEIAT-IA_d03_combine_PM2503_IAave.nc",
+    #     target_substances=['O3'],
+    #     target_substance_obs='O3',
+    #     Molar_mass=48,
+    #     airstation_files_dir=r'E:\全国空气质量\全国站点小时浓度csv_files\\',
+    #     airstation_infofile_dir="E:\全国空气质量\_站点列表\站点列表-2022.02.13起.csv",
+    #     result_pic_types=['line','scatter'],
+    #     out_dir=r'E:\Emission_update\\validation\\',
+    #     result_csv_name='validationPara',
+    #     suffix='IAave'
+    # )
+
+    CMAQ_site_validation(   # CQMLEM
+        start_date='2020-01-02',
+        daycount=27,
         simdata_inithour=16,
-        GRIDCRO2D_file_dir="E:\Emission_update\GRIDCRO2D_2020213.nc",
-        Combine_file_dir="E:\Emission_update\CD202008_MEIAT-IA_d03_combine_PM2503_IAave.nc",
-        target_substances=['O3'],
-        target_substance_obs='O3',
-        Molar_mass=48,
+        GRIDCRO2D_file_dir="E:\SichuanCMAQPMtrends\GRIDCRO2D_d03.nc",
+        Combine_file_dir="E:\CQemis_ML2hourly\COMBINE_ACONC_v532_gcc_20200101_202001.nc",
+        target_substances=['PM25_TOT'],
+        target_substance_obs='PM2.5',
+        Molar_mass=0,
         airstation_files_dir=r'E:\全国空气质量\全国站点小时浓度csv_files\\',
         airstation_infofile_dir="E:\全国空气质量\_站点列表\站点列表-2022.02.13起.csv",
         result_pic_types=['line','scatter'],
-        out_dir=r'E:\Emission_update\\validation\\',
+        out_dir=r'E:\CQemis_ML2hourly\validation\\',
         result_csv_name='validationPara',
-        suffix='IAave'
+        suffix='CQMLEM'
     )
+
+    # CMAQ_site_validation(   # CQMLEM_origin
+    #     start_date='2020-01-02',
+    #     daycount=27,
+    #     simdata_inithour=40,
+    #     GRIDCRO2D_file_dir="E:\SichuanCMAQPMtrends\GRIDCRO2D_d03.nc",
+    #     Combine_file_dir="E:\SichuanCMAQPMtrends\cctmCombine\CCTM_ISAM_PM25_2020_v54_newem_region.nc",
+    #     target_substances=['PM25_BCO','PM25_ICO','PM25_OTH','PM25_CDEM','PM25_CQEM','PM25_SCBEEM','PM25_SCBWEM'],
+    #     target_substance_obs='PM2.5',
+    #     Molar_mass=0,
+    #     airstation_files_dir=r'E:\全国空气质量\全国站点小时浓度csv_files\\',
+    #     airstation_infofile_dir="E:\全国空气质量\_站点列表\站点列表-2022.02.13起.csv",
+    #     result_pic_types=['line','scatter'],
+    #     out_dir=r'E:\CQemis_ML2hourly\validation_origin\\',
+    #     result_csv_name='validationPara',
+    #     suffix='CQMLEM_orign'
+    # )
+
     pass

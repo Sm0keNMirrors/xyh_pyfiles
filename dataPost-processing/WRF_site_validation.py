@@ -112,8 +112,6 @@ def calcuIOA(modData,obsData):
 
     return 1 - ALL1/ALL2
 
-
-
 def calcuNMB(modData, obsData):
     N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
     ALL1 = 0
@@ -124,7 +122,6 @@ def calcuNMB(modData, obsData):
         ALL1 += modData[i] - obsData[i]
         ALL2 += obsData[i]
     return ALL1 / ALL2
-
 
 def calcuNME(modData, obsData):
     N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
