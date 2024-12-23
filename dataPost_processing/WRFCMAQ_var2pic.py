@@ -4,8 +4,7 @@ import numpy as np
 import netCDF4 as nc
 from tqdm import tqdm
 import cartopy.crs as ccrs
-import matplotlib.pyplot as plt
-from matplotlib import colors
+from matplotlib import colors, font_manager, rcParams, pyplot as plt
 import cartopy.feature as cfeat
 from cartopy.io.shapereader import Reader
 from datetime import datetime, timedelta
@@ -159,7 +158,7 @@ def WRFCMAQ_var2pic(
 
                 # =====================😼😼😼😼😼😼😼😼😼########😼😼😼😼😼😼😼😼😼😼😼😼😼=====================
     hourly_datas,daily_datas,allmean_datas = {},{},{} # 用于输出直接的array结果
-    for var in target_vars:
+    for var in target_vars['direct']:
         hourly_datas.update({var:[]})
         daily_datas.update({var: []})
         allmean_datas.update({var: []})
@@ -167,6 +166,13 @@ def WRFCMAQ_var2pic(
     # 绘制图片基本框架
     matplotlib.rcParams['font.sans-serif'] = ['SimHei']  # 使用黑体
     matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
+    font_path = r"D:\Fonts\times+simsun.ttf"
+    font_manager.fontManager.addfont(font_path)
+    prop = font_manager.FontProperties(fname=font_path)
+    matplotlib.rcParams['font.family'] = 'sans-serif'  # 使用字体中的无衬线体
+    rcParams['font.sans-serif'] = prop.get_name()  # 根据名称设置字体
+    rcParams['font.size'] = 13  # 设置字体大小
+    rcParams['axes.unicode_minus'] = False  # 使坐标轴刻度标签正常显示正负号
 
     if 'hourly' in result_data_types:
         start_date_o = datetime.strptime(start_date, '%Y-%m-%d')
@@ -227,7 +233,7 @@ def WRFCMAQ_var2pic(
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation='horizontal', extend='both',ticks=cb_ticks, format='%i', fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
-                cb.set_label(label=var+' concentration'+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
+                cb.set_label(label=var+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
                 if WRFout_files_winddata_dir != "":
                     ax.quiver(winddata[0][0], winddata[1][0], winddata[2][0], winddata[3][0], transform=proj, scale=8,
                           scale_units='inches', width=0.0015)
@@ -310,7 +316,7 @@ def WRFCMAQ_var2pic(
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation='horizontal', extend='both',ticks=cb_ticks, format='%i', fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
-                cb.set_label(label=var+' concentration'+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
+                cb.set_label(label=var+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
                 if WRFout_files_winddata_dir != "":
                     ax.quiver(winddata[0][0], winddata[1][0], winddata[2][0], winddata[3][0], transform=proj, scale=8,
                           scale_units='inches', width=0.0015)
@@ -392,7 +398,7 @@ def WRFCMAQ_var2pic(
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation='horizontal', extend='both',ticks=cb_ticks, format='%i', fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
-                cb.set_label(label=var+' concentration'+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
+                cb.set_label(label=var+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
                 if WRFout_files_winddata_dir != "":
                     ax.quiver(winddata[0][0], winddata[1][0], winddata[2][0], winddata[3][0], transform=proj, scale=8,
                           scale_units='inches', width=0.0015)
@@ -445,7 +451,7 @@ if __name__ == '__main__':
         target_vars_cmap=['jet','pollution'],
         target_vars_unit=['m','ug/m3'],
         Molar_mass={'O3':48},
-        result_pic_type='contourf',
+        result_pic_type='pcolormesh',
         # bgimage_dir_alpha = [r"E:\ArcGISfiles\WRFdomain_300mRGB.tif",0.75,[95, 113, 23, 37]],
         result_data_types=['daily','allmean'],
         fig_size = (6, 10),
