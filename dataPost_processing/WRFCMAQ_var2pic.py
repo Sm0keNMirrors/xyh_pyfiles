@@ -41,16 +41,18 @@ def getWRFvarsCombined(WRFout_files_dir,metvar):
 
     WRFoutf = nc.Dataset(WRFout_files_dir + WRF_file_list[0], "r")  # 打开WRF输出的HDF格式文件
     data_shape = np.array(WRFoutf.variables["XLAT"]).shape  # 获得数据shape来存放空变量
-    metvar_now = np.zeros(data_shape, dtype=np.float64)
+    # metvar_now = np.zeros(data_shape, dtype=np.float64)
     metvar_next = np.zeros(data_shape, dtype=np.float64)
     WRFoutf.close()
 
     WRF_file_list_time_list = list(WRF_file_list_time.keys())  # 将WRF风场数据合并为1个文件，用来求8h平均
+    metvar_now = np.array(nc.Dataset(WRFout_files_dir + WRF_file_list_time_list[0], "r").variables[
+                              metvar])  # 合并的初始文件是第一个 拥有第一个wrfout的初始数据
     for n in tqdm(WRF_file_list_time_list,desc=f'读取并合并WRF输出参数{metvar}:'):
         n_num = WRF_file_list_time_list.index(n)
         if n_num + 1 >= len(WRF_file_list_time_list):
             metvar_combine = metvar_now
-            break
+            continue
         n2 = WRF_file_list_time_list[n_num + 1]
         WRFoutf = nc.Dataset(WRFout_files_dir + n, "r")  # 打开WRF输出的HDF格式文件
         WRFoutf_next = nc.Dataset(WRFout_files_dir + n2, "r")  # 打开WRF输出的HDF格式文件
@@ -73,24 +75,40 @@ def WRFCMAQ_var2pic(
     shp_files_dir = "",
     bgimage_dir_alpha = ["",0.5], # 是否添加底图tiff，以及添加后结果图的透明度,底图tiff经纬度原始范围
     input_vars ={'WRF':[],'CMAQ':[]}, # {'WRF':[],'CMAQ':[]}读取的变量，用于输出或者计算最终输出变量，来源模型:变量组
-    target_vars = {'direct':[],'indirect':[]}, # 输出的变量，direct：直接读取后输出，indirect：计算后输出，计算方式自行在函数中添加
+    target_vars = {'direct':[],'indirect':[]}, # 输出的变量，direct：直接读取后输出，indirect：计算后输出，计算方式即对应输出变量名称自行在函数中添加
+    target_vars_ifdrawwind = [], # 对应上面每个输出变量的图，哪个输出风向箭头，参数为布尔值序列[True,False,False]
     target_vars_cmap = [], # 输出变量的颜色条类型，依照target_vars顺序输入，包括常用的：jet、rainbow、pollution
     target_vars_unit = [], # 输出变量的单位，依照target_vars顺序输入，有μg/m$^{3}$，℃，m等
+    target_vars_name = [], # 每个变量在图标题和bar标题显示的名称，而不是直接的变量名，依照target_vars顺序输入
+    target_vars_cbarticksFormat = [], # cbar的标识数值保留小数几位，依照target_vars顺序输入，当数值小的时候需要设置，'%i' '%.1f'
     Molar_mass ={'target_var_name':0}, # 输出变量若需要进行ppm转换的摩尔质量：输出变量名：摩尔质量大小
     result_data_types=[], # 输出结果图的包含哪些时平均结果，包括hourly daily monthly monthly_max8h allmean
     cbar_min_max = [], # 制定绘图色条的最大值和最小值，不填写则默认最大最小值
+
     fig_size = (5,5), # 输出图像范围的大致长宽程度
+    cbar_positions = ['horizontal',[0.1, 0.1, 0.8, 0.025]], # color的位置信息，[水平垂直信息, axe信息]
+    result_positions = [0.12,0.88,0.2,0.95,0.2,0.2], # 经纬度图的绘制位置信息，即plt.subplots_adjust(left=0.12, right=0.88, bottom=0.2, top=0.95, wspace=0.2, hspace=0.2)的参数，
     result_pic_type='', #输出结果图类型contourf, pcolormesh
+    wind_scale = [5,0.003], # 风向箭头大小数据，scale和width，单位为inches
+
     out_dir = "",
     return2array = False, #是否不输出图像，直接将结果输出成array数组，用于其他分析或者特殊绘图
     suffix = "",
-):
 
+    ifpicdif = False, # 是否绘制差值图像，即上面所有相关变量，基于下面的输入数据为减数的差值图输出，
+    WRFout_files2_dir = "",
+    CMAQcombine_file2_dir = "", # 仅给出
+    difresult_data_types=['allmean'], # 差值输出结果图的包含哪些平均结果，暂时仅支持allmean
+    difpic_title = "", # 差值图自定义标题，表示哪两次模拟的
+):
+    os.makedirs(out_dir, exist_ok=True)
     if os.path.exists(out_dir) is False: os.mkdir(out_dir)
 
     if CMAQcombine_file_dir != "":CMAQf = nc.Dataset(CMAQcombine_file_dir)
+    if CMAQcombine_file2_dir != "": CMAQf2 = nc.Dataset(CMAQcombine_file2_dir)
     if GRIDCRO2D_file_dir != "": GRIDCRO2D = nc.Dataset(GRIDCRO2D_file_dir, 'r')
     if WRFout_files_dir != "": WRFoutfiles = os.listdir(WRFout_files_dir)
+    if WRFout_files2_dir != "": WRFoutfiles2 = os.listdir(WRFout_files2_dir)
     if WRFout_files_winddata_dir != "": WRFoutfiles_winddata = os.listdir(WRFout_files_winddata_dir)
     if shp_files_dir != "": shpfiles = [x for x in os.listdir(shp_files_dir) if x.split('.')[1] == 'shp' and len(x.split('.')) == 2]
 
@@ -111,14 +129,16 @@ def WRFCMAQ_var2pic(
         ROW_wind = np.array(WRFoutf.variables["XLAT"]).shape[1]  # 获得数据格式shape1
         COL_wind = np.array(WRFoutf.variables["XLAT"]).shape[2]  # 获得数据格式shape2
         WRFoutf.close()
-
         wind_XLAT = getWRFvarsCombined(WRFout_files_winddata_dir, 'XLAT')
         wind_XLONG = getWRFvarsCombined(WRFout_files_winddata_dir, 'XLONG')
         wind_WSV = getWRFvarsCombined(WRFout_files_winddata_dir, 'V10')
         wind_WSU = getWRFvarsCombined(WRFout_files_winddata_dir, 'U10')
         wind_WD = 180.0 + np.arctan2(wind_WSU, wind_WSV) * 180.0 / np.pi  # 计算风向
+        wind_XLAT_one = wind_XLAT[0,:,:]
+        wind_XLONG_one = wind_XLONG[0, :, :]
+        windshape = (1,ROW_wind,COL_wind)
 
-        winddata = [wind_XLAT, wind_XLONG, wind_WSV, wind_WSU, wind_WD]
+
 
 
     cmapdict = ['white', '#75bbfd', 'green', 'yellow', 'red', 'maroon']  # 自定义colorbar的颜色
@@ -127,19 +147,24 @@ def WRFCMAQ_var2pic(
 
 
     input_vars_get = {}
+    if ifpicdif == True: input_vars_get2 = {}
     for model in input_vars:
         if model == 'WRF':
             for var in input_vars[model]:
                 input_vars_get.update({var:getWRFvarsCombined(WRFout_files_dir,var)})
+                if ifpicdif == True: input_vars_get2.update({var:getWRFvarsCombined(WRFout_files2_dir,var)})
         if model == 'CMAQ':
             for var in input_vars[model]:
                 input_vars_get.update({var:CMAQf[var][CMAQcombine_inithour:CMAQcombine_inithour+24*daycount]})
+                if ifpicdif == True: input_vars_get2.update({var:CMAQf2[var][CMAQcombine_inithour:CMAQcombine_inithour+24*daycount]})
 
     output_vars = {}
+    if ifpicdif == True: output_vars2 = {}
     for type in target_vars:
         if type == 'direct':
             for var in target_vars[type]:
                 output_vars.update({var:input_vars_get[var]})
+                if ifpicdif == True:output_vars2.update({var:input_vars_get2[var]})
     for type in target_vars:
         if type == 'indirect':
             for var in target_vars[type]:
@@ -148,17 +173,30 @@ def WRFCMAQ_var2pic(
 
 
 
-
                 if var == 'RH':
-                    vardata = 0.236 * input_vars_get['PSFC'] * input_vars_get['Q2'] * np.exp((17.67 * input_vars_get['T2']) / (input_vars_get['T2'] - 273.15 - 29.65)) ** (-1)
+                    vardata = 0.236 * input_vars_get['PSFC'] * input_vars_get['Q2'] * np.exp(
+                        (17.67 * (input_vars_get['T2'] - 273.15)) / (input_vars_get['T2'] - 29.65)) ** (-1)
                     output_vars.update({var: vardata})
-
-
-
+                    if ifpicdif == True:
+                        vardata2 = 0.236 * input_vars_get2['PSFC'] * input_vars_get2['Q2'] * np.exp(
+                            (17.67 * (input_vars_get2['T2'] - 273.15)) / (input_vars_get2['T2'] - 29.65)) ** (-1)
+                        output_vars2.update({var: vardata2})
+                if var == 'T2_C':
+                    vardata = input_vars_get['T2'] - 273.15
+                    output_vars.update({var: vardata})
+                    if ifpicdif == True:
+                        vardata2 = input_vars_get2['T2'] - 273.15
+                        output_vars2.update({var: vardata2})
+                if var == 'WS':
+                    vardata = np.sqrt(input_vars_get['V10'] ** 2 + input_vars_get['U10'] ** 2)  # 分速度求和速度
+                    output_vars.update({var: vardata})
+                    if ifpicdif == True:
+                        vardata2 = np.sqrt(input_vars_get2['V10'] ** 2 + input_vars_get2['U10'] ** 2)  # 分速度求和速度
+                        output_vars2.update({var: vardata2})
 
                 # =====================😼😼😼😼😼😼😼😼😼########😼😼😼😼😼😼😼😼😼😼😼😼😼=====================
     hourly_datas,daily_datas,allmean_datas = {},{},{} # 用于输出直接的array结果
-    for var in target_vars['direct']:
+    for var in target_vars['direct']+target_vars['indirect']:
         hourly_datas.update({var:[]})
         daily_datas.update({var: []})
         allmean_datas.update({var: []})
@@ -202,7 +240,7 @@ def WRFCMAQ_var2pic(
                     shp_c = cfeat.ShapelyFeature(Reader(shp_files_dir + shp).geometries(), proj, edgecolor='k',
                                                  facecolor='none')
                     ax.add_feature(shp_c, lw=0.6, zorder=2)
-                position = fig.add_axes([0.1, 0.1, 0.8, 0.025])  # colorbar位置
+                position = fig.add_axes(cbar_positions[1])  # colorbar位置
                 if result_pic_type == 'contourf':
                     if hourlydata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
@@ -221,29 +259,33 @@ def WRFCMAQ_var2pic(
                     if hourlydata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
                         lat_c = lat[0:lat.shape[0] - 2, 0:lat.shape[1] - 2]
-                        data_pic = ax.pcolormesh(lon_c, lat_c, hourlydata, cmap=target_vars_cmap_[index])
+                        data_pic = ax.pcolormesh(lon_c, lat_c, hourlydata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
                     else:
-                        data_pic = ax.pcolormesh(lon, lat, hourlydata, cmap=target_vars_cmap_[index])
+                        data_pic = ax.pcolormesh(lon, lat, hourlydata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
-                cb = fig.colorbar(data_pic, cax=position, orientation='horizontal', extend='both',ticks=cb_ticks, format='%i', fraction=0.2)
+                cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
-                cb.set_label(label=var+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
-                if WRFout_files_winddata_dir != "":
-                    ax.quiver(winddata[0][0], winddata[1][0], winddata[2][0], winddata[3][0], transform=proj, scale=8,
-                          scale_units='inches', width=0.0015)
+                cb.set_label(label=target_vars_name[index]+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
+
+                if WRFout_files_winddata_dir != "" and target_vars_ifdrawwind[index] == True:
+                    wind_WSU_d = wind_WSU[hour, :, :]
+                    wind_WSV_d = wind_WSV[hour, :, :]
+                    ax.quiver(wind_XLONG_one[:, :], wind_XLAT_one[:, :], wind_WSU_d[0, :, :], wind_WSV_d[0, :, :],
+                              transform=proj, scale=wind_scale[0],
+                              scale_units='inches', width=wind_scale[1])
                 gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.2, color='k', alpha=0.2,
                                   linestyle='--')
                 if bgimage_dir_alpha[0] != "": # 绘制底图
                     ax.imshow(plt.imread(bgimage_dir_alpha[0]), origin='upper',zorder=1, transform=proj, extent=bgimage_dir_alpha[2], alpha=bgimage_dir_alpha[1])
                 hourly_datas[var].append(hourlydata) # 存放结果array
-                plt.subplots_adjust(left=0.1, right=0.9, bottom=0.2, top=0.8, wspace=0.2, hspace=0.2)
-                ax.set_title(f'Hourly {var} at {str(date_now)}',fontsize=15,pad=30)
+                plt.subplots_adjust(left=result_positions[0], right=result_positions[1], bottom=result_positions[2], top=result_positions[3], wspace=result_positions[4], hspace=result_positions[5])
+                ax.set_title(f'{target_vars_name[index]} {str(date_now)}小时均值',fontsize=15,pad=30)
                 gl.xlabel_style = {'size': 15}  # 设置经度标签字体大小
                 gl.ylabel_style = {'size': 15}  # 设置纬度标签字体大小
                 plt.savefig(hourly_var_out_dir+f'{var} {str(date_now)}'.replace(':',"-"))
@@ -285,7 +327,7 @@ def WRFCMAQ_var2pic(
                     shp_c = cfeat.ShapelyFeature(Reader(shp_files_dir + shp).geometries(), proj, edgecolor='k',
                                                  facecolor='none')
                     ax.add_feature(shp_c, lw=0.6, zorder=2)
-                position = fig.add_axes([0.1, 0.1, 0.8, 0.025])  # colorbar位置
+                position = fig.add_axes(cbar_positions[1])  # colorbar位置
                 if result_pic_type == 'contourf':
                     if dailydata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
@@ -304,29 +346,38 @@ def WRFCMAQ_var2pic(
                     if dailydata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
                         lat_c = lat[0:lat.shape[0] - 2, 0:lat.shape[1] - 2]
-                        data_pic = ax.pcolormesh(lon_c, lat_c, dailydata, cmap=target_vars_cmap_[index])
+                        data_pic = ax.pcolormesh(lon_c, lat_c, dailydata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
                     else:
-                        data_pic = ax.pcolormesh(lon, lat, dailydata, cmap=target_vars_cmap_[index])
+                        data_pic = ax.pcolormesh(lon, lat, dailydata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
-                cb = fig.colorbar(data_pic, cax=position, orientation='horizontal', extend='both',ticks=cb_ticks, format='%i', fraction=0.2)
+                cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
-                cb.set_label(label=var+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
-                if WRFout_files_winddata_dir != "":
-                    ax.quiver(winddata[0][0], winddata[1][0], winddata[2][0], winddata[3][0], transform=proj, scale=8,
-                          scale_units='inches', width=0.0015)
+                cb.set_label(label=target_vars_name[index]+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
+                if WRFout_files_winddata_dir != "" and target_vars_ifdrawwind[index] == True:
+                    wind_WSU_d = np.zeros(windshape, dtype=np.float64)
+                    wind_WSV_d = np.zeros(windshape, dtype=np.float64)
+                    for h in range(0, 24):
+                        wind_WSU_d += wind_WSU[day*24+hour, :, :]
+                        wind_WSV_d += wind_WSV[day*24+hour, :, :]
+                    wind_WSV_d /= 24
+                    wind_WSU_d /= 24
+                    ax.quiver(wind_XLONG_one[:, :], wind_XLAT_one[:, :], wind_WSU_d[0, :, :], wind_WSV_d[0, :, :],
+                              transform=proj, scale=wind_scale[0],
+                              scale_units='inches', width=wind_scale[1])
                 gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.2, color='k', alpha=0.2,
                                   linestyle='--')
                 if bgimage_dir_alpha[0] != "": # 绘制底图
                     ax.imshow(plt.imread(bgimage_dir_alpha[0]), origin='upper',zorder=1, transform=proj, extent=bgimage_dir_alpha[2], alpha=bgimage_dir_alpha[1])
                 daily_datas[var].append(dailydata)  # 存放结果array
-                plt.subplots_adjust(left=0.1, right=0.9, bottom=0.2, top=0.8, wspace=0.2, hspace=0.2)
-                ax.set_title(f'daily {var} at {str(date_now)}',fontsize=15,pad=30)
+                plt.subplots_adjust(left=result_positions[0], right=result_positions[1], bottom=result_positions[2],
+                                    top=result_positions[3], wspace=result_positions[4], hspace=result_positions[5])
+                ax.set_title(f'{target_vars_name[index]} {str(date_now)}日均值',fontsize=15,pad=30)
                 gl.xlabel_style = {'size': 15}  # 设置经度标签字体大小
                 gl.ylabel_style = {'size': 15}  # 设置纬度标签字体大小
                 plt.savefig(daily_var_out_dir+f'{var} {str(date_now)}'.replace(':',"-"))
@@ -353,11 +404,13 @@ def WRFCMAQ_var2pic(
                         allmeandata += output_vars[var][hour,:,:]
                     allmeandata /= 24*daycount
                 if cbar_min_max == []:
-                    cbarmax = np.ceil(np.max(allmeandata) / 10) * 10
-                    cbarmin = np.floor(np.min(allmeandata) / 10) * 10
+                    # cbarmax = np.ceil(np.max(allmeandata) / 10) * 10
+                    # cbarmin = np.floor(np.min(allmeandata) / 10) * 10
+                    cbarmax = np.max(allmeandata)
+                    cbarmin = np.min(allmeandata)
                 else: cbarmin,cbarmax = cbar_min_max[0],cbar_min_max[1]
                 # if cbarmin == cbarmax: continue # 说明数据为空 不输出
-                if cbarmin == cbarmax: cbarmax,cbarmin = 1,0  # 数据为空但继续输出
+                # if cbarmin == cbarmax: cbarmax,cbarmin = 1,0  # 数据为空但继续输出
 
                 proj = ccrs.PlateCarree()  # 创建坐标系
                 fig = plt.figure(figsize=fig_size,dpi=150)  # 创建页面
@@ -367,7 +420,7 @@ def WRFCMAQ_var2pic(
                     shp_c = cfeat.ShapelyFeature(Reader(shp_files_dir + shp).geometries(), proj, edgecolor='k',
                                                  facecolor='none')
                     ax.add_feature(shp_c, lw=0.6, zorder=2)
-                position = fig.add_axes([0.1, 0.1, 0.8, 0.025])  # colorbar位置
+                position = fig.add_axes(cbar_positions[1])  # colorbar位置
                 if result_pic_type == 'contourf':
                     if allmeandata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
@@ -386,29 +439,37 @@ def WRFCMAQ_var2pic(
                     if allmeandata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
                         lat_c = lat[0:lat.shape[0] - 2, 0:lat.shape[1] - 2]
-                        data_pic = ax.pcolormesh(lon_c, lat_c, allmeandata, cmap=target_vars_cmap_[index])
+                        data_pic = ax.pcolormesh(lon_c, lat_c, allmeandata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
                     else:
-                        data_pic = ax.pcolormesh(lon, lat, allmeandata, cmap=target_vars_cmap_[index])
+                        data_pic = ax.pcolormesh(lon, lat, allmeandata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
-                cb = fig.colorbar(data_pic, cax=position, orientation='horizontal', extend='both',ticks=cb_ticks, format='%i', fraction=0.2)
+                cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
-                cb.set_label(label=var+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
-                if WRFout_files_winddata_dir != "":
-                    ax.quiver(winddata[0][0], winddata[1][0], winddata[2][0], winddata[3][0], transform=proj, scale=8,
-                          scale_units='inches', width=0.0015)
+                cb.set_label(label=target_vars_name[index]+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
+                if WRFout_files_winddata_dir != "" and target_vars_ifdrawwind[index] == True:
+                    wind_WSU_d = np.zeros(windshape, dtype=np.float64)
+                    wind_WSV_d = np.zeros(windshape, dtype=np.float64)
+                    for h in range(0,24*daycount):
+                        wind_WSU_d += wind_WSU[h, :, :]
+                        wind_WSV_d += wind_WSV[h, :, :]
+                    wind_WSV_d /= 24*daycount
+                    wind_WSU_d /= 24*daycount
+                    ax.quiver(wind_XLONG_one[:,:], wind_XLAT_one[:,:], wind_WSU_d[0,:,:], wind_WSV_d[0,:,:], transform=proj, scale=wind_scale[0],
+                          scale_units='inches', width=wind_scale[1])
                 gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.2, color='k', alpha=0.2,
                                   linestyle='--')
                 if bgimage_dir_alpha[0] != "": # 绘制底图
                     ax.imshow(plt.imread(bgimage_dir_alpha[0]), origin='upper',zorder=1, transform=proj, extent=bgimage_dir_alpha[2], alpha=bgimage_dir_alpha[1])
                 allmean_datas[var].append(allmeandata)  # 存放结果array
-                plt.subplots_adjust(left=0.1, right=0.9, bottom=0.2, top=0.8, wspace=0.2, hspace=0.2)
-                ax.set_title(f'allmean {var} during simulation',fontsize=15,pad=30)
+                plt.subplots_adjust(left=result_positions[0], right=result_positions[1], bottom=result_positions[2],
+                                    top=result_positions[3], wspace=result_positions[4], hspace=result_positions[5])
+                ax.set_title(f'{target_vars_name[index]} 模拟时段总均值',fontsize=15,pad=30)
                 gl.xlabel_style = {'size': 15}  # 设置经度标签字体大小
                 gl.ylabel_style = {'size': 15}  # 设置纬度标签字体大小
                 plt.savefig(allmean_var_out_dir+f'{var} allmean'.replace(':',"-"))
@@ -417,46 +478,139 @@ def WRFCMAQ_var2pic(
     if return2array == True:
         return [hourly_datas,daily_datas,allmean_datas]
 
+    if ifpicdif == True:
+        for day in tqdm(range(0,1),desc="输出模拟时段总平均值 2次模拟差值："):
+            allmean_out_dir = out_dir + "allmeandif\\"
+            if os.path.exists(allmean_out_dir) is False: os.mkdir(allmean_out_dir)
+            for var in output_vars:
+                allmean_var_out_dir = allmean_out_dir + f"{var}\\"
+                if os.path.exists(allmean_var_out_dir) is False: os.mkdir(allmean_var_out_dir)
+
+                index = list(output_vars.keys()).index(var)
+                if output_vars[var].ndim == 4 :
+                    allmeandata1 = np.zeros(shape=(output_vars[var].shape[2], output_vars[var].shape[3]))
+                    for hour in range(0,24*daycount):
+                        allmeandata1 += output_vars[var][hour,0,:,:]
+                    allmeandata1 /= 24*daycount
+                    allmeandata2 = np.zeros(shape=(output_vars2[var].shape[2], output_vars2[var].shape[3]))
+                    for hour in range(0, 24 * daycount):
+                        allmeandata2 += output_vars2[var][hour, 0, :, :]
+                    allmeandata2 /= 24 * daycount
+                    allmeandatadif = allmeandata1 - allmeandata2
+                if output_vars[var].ndim == 3:
+                    allmeandata1 = np.zeros(shape=(output_vars[var].shape[1], output_vars[var].shape[2]))
+                    for hour in range(0,24*daycount):
+                        allmeandata1 += output_vars[var][hour,:,:]
+                    allmeandata1 /= 24*daycount
+                    allmeandata2 = np.zeros(shape=(output_vars2[var].shape[1], output_vars2[var].shape[2]))
+                    for hour in range(0, 24 * daycount):
+                        allmeandata2 += output_vars2[var][hour, :, :]
+                    allmeandata2 /= 24 * daycount
+                    allmeandatadif = allmeandata1 - allmeandata2
+                if cbar_min_max == []:
+                    cbarmax = np.ceil(np.max(allmeandatadif) / 10) * 10
+                    cbarmin = np.floor(np.min(allmeandatadif) / 10) * 10
+                else: cbarmin,cbarmax = cbar_min_max[0],cbar_min_max[1]
+                # if cbarmin == cbarmax: continue # 说明数据为空 不输出
+                if cbarmin == cbarmax: cbarmax,cbarmin = 1,0  # 数据为空但继续输出
+                barmax = np.max(abs(allmeandatadif))
+                cbarmax=barmax
+                cbarmin=-barmax
+
+                proj = ccrs.PlateCarree()  # 创建坐标系
+                fig = plt.figure(figsize=fig_size,dpi=150)  # 创建页面
+                ax = fig.subplots(1, 1, subplot_kw={'projection': proj})
+                # 读取所有shp并绘制
+                for shp in shpfiles:
+                    shp_c = cfeat.ShapelyFeature(Reader(shp_files_dir + shp).geometries(), proj, edgecolor='k',
+                                                 facecolor='none')
+                    ax.add_feature(shp_c, lw=0.6, zorder=2)
+                position = fig.add_axes(cbar_positions[1])  # colorbar位置
+                if result_pic_type == 'contourf':
+                    if allmeandatadif.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
+                        lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
+                        lat_c = lat[0:lat.shape[0] - 2, 0:lat.shape[1] - 2]
+                        data_pic = ax.contourf(lon_c, lat_c, allmeandatadif, cmap='bwr',
+                                               levels=np.linspace(cbarmin, cbarmax, 80))
+                        LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
+                        LON_vert = getArrayVertices(lon_c)
+                        ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                    else:
+                        data_pic = ax.contourf(lon, lat, allmeandatadif, cmap='bwr',levels=np.linspace(cbarmin, cbarmax, 80))
+                        LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
+                        LON_vert = getArrayVertices(lon)
+                        ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                if result_pic_type == 'pcolormesh':
+                    if allmeandatadif.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
+                        lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
+                        lat_c = lat[0:lat.shape[0] - 2, 0:lat.shape[1] - 2]
+                        data_pic = ax.pcolormesh(lon_c, lat_c, allmeandatadif, cmap='bwr',vmin=cbarmin,vmax=cbarmax)
+                        LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
+                        LON_vert = getArrayVertices(lon_c)
+                        ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                    else:
+                        data_pic = ax.pcolormesh(lon, lat, allmeandatadif, cmap='bwr',vmin=cbarmin,vmax=cbarmax)
+                        LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
+                        LON_vert = getArrayVertices(lon)
+                        ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                cb_ticks = np.linspace(cbarmin, cbarmax, 7)
+                cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
+                cb.ax.tick_params(labelsize=17)  # 刻度字体大小
+                cb.set_label(label=target_vars_name[index]+' '+f'(units: {target_vars_unit[index]})', fontsize=12)  # 设置colorbar的标签字体及其大小
+
+                gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.2, color='k', alpha=0.2,
+                                  linestyle='--')
+                if bgimage_dir_alpha[0] != "": # 绘制底图
+                    ax.imshow(plt.imread(bgimage_dir_alpha[0]), origin='upper',zorder=1, transform=proj, extent=bgimage_dir_alpha[2], alpha=bgimage_dir_alpha[1])
+                allmean_datas[var].append(allmeandatadif)  # 存放结果array
+                plt.subplots_adjust(left=result_positions[0], right=result_positions[1], bottom=result_positions[2],
+                                    top=result_positions[3], wspace=result_positions[4], hspace=result_positions[5])
+                ax.set_title(f'{difpic_title}{target_vars_name[index]}模拟时段总均值变化量',fontsize=15,pad=30)
+                gl.xlabel_style = {'size': 15}  # 设置经度标签字体大小
+                gl.ylabel_style = {'size': 15}  # 设置纬度标签字体大小
+                plt.savefig(allmean_var_out_dir+f'{var} allmean'.replace(':',"-"))
+                plt.close()
+
+
 
 
 if __name__ == '__main__':
-    # WRFCMAQ_var2pic(
-    #     start_date='2022-08-01',
-    #     daycount=31,
-    #     WRFout_files_dir='E:\CMAQdata_chengdu202208\WRFd03_2\\',
-    #     # CMAQcombine_file_dir='',
-    #     WRFout_files_winddata_dir='E:\CMAQdata_chengdu202208\WRFd02\\',
-    #     shp_files_dir='E:\CMAQdata_chengdu202208\shps\\',
-    #     input_vars={'WRF':['PSFC','Q2','T2']},
-    #     target_vars={'direct':['T2'],'indirect':['RH']},
-    #     target_vars_cmap=['jet','ocean'],
-    #     target_vars_unit=['℃','%'],
-    #     result_pic_type='contourf',
-    #     result_data_types=['hourly'],
-    #     out_dir=r'E:\Emission_update\test_var2pic\\',
-    #     suffix='test'
-    # )
+
 
     WRFCMAQ_var2pic(
         start_date='2022-08-18',
         daycount=4,
-        WRFout_files_dir=r'E:\LQSlanduse\2020\wrfout\\',
+        WRFout_files_dir=r'E:\LQSlanduse\2022_summer\d03\\',
         CMAQcombine_inithour=16,
-        CMAQcombine_file_dir=r"E:\LQSlanduse\2020\COMBINE_ACONC_v532_gcc_20220818_202208.nc",
+        CMAQcombine_file_dir=r"E:\LQSlanduse\2022_summer\COMBINE_ACONC_v532_gcc_20220818_202208.nc",
         GRIDCRO2D_file_dir=r"E:\LQSlanduse\GRIDCRO2D_2022230.nc",
-        WRFout_files_winddata_dir="",
+        WRFout_files_winddata_dir=r'E:\LQSlanduse\2022_summer\d02\\',
         shp_files_dir='E:\CMAQdata_chengdu202208\shps\\',
-        input_vars={'WRF':['PBLH'],'CMAQ':['O3']},
-        target_vars={'direct':['PBLH','O3']},
-        target_vars_cmap=['jet','pollution'],
-        target_vars_unit=['m','ug/m3'],
+        input_vars={'WRF':['PBLH','PSFC','Q2','T2','V10','U10',],'CMAQ':['O3','PM25_TOT']},
+        target_vars={'direct':['PBLH','O3','PM25_TOT'],'indirect':['T2_C','WS','RH',]},
+        target_vars_ifdrawwind = [False,False,False,False,True,False],
+        target_vars_cmap=['jet','pollution','pollution','rainbow','rainbow','ocean',],
+        target_vars_unit=['m','ug/m3','ug/m3','℃','m/s','%'],
+        target_vars_cbarticksFormat = ['%i','%i','%i','%.1f','%.1f','%i',],
+        target_vars_name=['边界层高度','O$_{3}$','PM$_{25}$','温度','风速','相对湿度'],
         Molar_mass={'O3':48},
+
         result_pic_type='pcolormesh',
         # bgimage_dir_alpha = [r"E:\ArcGISfiles\WRFdomain_300mRGB.tif",0.75,[95, 113, 23, 37]],
-        result_data_types=['daily','allmean'],
-        fig_size = (6, 10),
-        out_dir=r'E:\LQSlanduse\2020\\picout\\',
-        suffix='2020landuse'
+        fig_size = (6, 9),
+        cbar_positions=['horizontal',[0.1, 0.1, 0.8, 0.025]],
+        result_positions=[0.12,0.88,0.15,0.95,0.2,0.2],
+        wind_scale = [5,0.003],
+
+        result_data_types=['allmean'],
+        out_dir=r'E:\LQSlanduse\picout\\2022_summer\\',
+        suffix='2022_summer',
+
+        ifpicdif=True,
+        WRFout_files2_dir=r'E:\LQSlanduse\2020_summer\d03\\',
+        CMAQcombine_file2_dir=r"E:\LQSlanduse\2020_summer\COMBINE_ACONC_v532_gcc_20220818_202208.nc",  # 仅给出
+        difresult_data_types=['allmean'],  # 差值输出结果图的包含哪些平均结果，暂时仅支持allmean
+        difpic_title="2020夏季到2022夏季",  # 差值图自定义标题，表示哪两次模拟的
     )
     pass
 
