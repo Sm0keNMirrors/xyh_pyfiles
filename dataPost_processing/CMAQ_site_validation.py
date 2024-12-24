@@ -1,3 +1,9 @@
+"""
+Author: Xaohan Xian
+GitHub: https://github.com/Sm0keNMirrors
+Last update:
+"""
+
 import datetime
 import os
 import numpy as np

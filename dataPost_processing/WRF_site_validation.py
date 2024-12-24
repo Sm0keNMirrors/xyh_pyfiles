@@ -1,3 +1,9 @@
+"""
+Author: Xaohan Xian
+GitHub: https://github.com/Sm0keNMirrors
+Last update:
+"""
+
 import time
 import matplotlib
 import netCDF4 as nc

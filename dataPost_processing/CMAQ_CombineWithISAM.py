@@ -1,12 +1,16 @@
+"""
+Author: Xaohan Xian
+GitHub: https://github.com/Sm0keNMirrors
+Last update: 2024年12月24日
+"""
+
 import os
 import datetime
-
 import PseudoNetCDF as pnc
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-
 
 def CMAQ_CombineWithISAM(
     start_date = "YYYY-MM-DD" ,#combine文件开始日期
@@ -24,7 +28,7 @@ def CMAQ_CombineWithISAM(
                          'ASO4J','ANO3J','ANH4J','ANAJ','ACLJ','AECJ',
                          'AOTHRJ','AFEJ','ASIJ','ATIJ','ACAJ',
                          'AMGJ','AMNJ','AALJ','AKJ','APOCJ','APNCOMJ',] # 合并的PM2.5组分
-     # 5.4版本CMAQISAM合并PM2.5的物种，物种完全，与普通CMAQ模拟的物种一直
+     # 5.4版本CMAQISAM合并PM2.5的物种，物种完全，与普通CMAQ模拟的物种一致
     substance_PM25_CMAQv54 = ['ASO4I' ,'ANO3I' ,'ANH4I' ,'ANAI' ,'ACLI' ,'AECI' ,'AOTHRI'  ,# 合并的PM2.5组分
                          'APOCI' ,'APNCOMI' ,'ALVOO1I' ,'ALVOO2I' ,'ASVOO1I' ,'ASVOO2I',
                          'ALVPO1I' ,'ASVPO1I' ,'ASVPO2I',
@@ -41,13 +45,14 @@ def CMAQ_CombineWithISAM(
                          'ASOIL' ,'ACORS' ,'ASEACAT' ,'ACLK' ,'ASO4K' ,'ANO3K' ,'ANH4K',]
     # 所有需要Combine的总物质，即 带标签的OPM各模态 和 带标签的O3等物种
     if 'PM25' in combined_tagged_subs:
-        combined_tagged_subs.remove('PM25')
+        combined_tagged_subs2 = combined_tagged_subs.copy() # 必须copy 直接复制会导致2个同时被remove
+        combined_tagged_subs2.remove('PM25')
         if CMAQISAM_version == "v53":
-            Combine_substance = substance_PM25_CMAQv53+combined_tagged_subs
+            Combine_substance = substance_PM25_CMAQv53+combined_tagged_subs2
             PMDIAGfilename = 'APMDIAG' # PM诊断文件名，53 54有所区别
             PM25_DIAGpara = ['PM25AT', 'PM25AC', 'PM25CO']  # 计算PM2.5浓度的诊断参数
-        if CMAQISAM_version == "v54":
-            Combine_substance = substance_PM25_CMAQv54+combined_tagged_subs
+        elif CMAQISAM_version == "v54":
+            Combine_substance = substance_PM25_CMAQv54+combined_tagged_subs2
             PMDIAGfilename = 'AELMO' # PM诊断文件名，53 54有所区别
             PM25_DIAGpara = ['FPM25AIT', 'FPM25ACC', 'FPM25COR']
         else:
@@ -89,7 +94,7 @@ def CMAQ_CombineWithISAM(
     CCTM_day = len(to_combine_files_list)
     daynum = CCTM_day  # 模拟的天数
     for x in tqdm(Combinevars,desc="SAACONC被tag变量数据读取合并..."):
-        if x not in ['FPM25AIT', 'FPM25ACC', 'FPM25COR']:  # 合并一般物质 
+        if x not in PM25_DIAGpara:  # 合并一般物质
             for i in to_combine_files_list:
                 CONCf = nc.Dataset(CCTM_dir + i)
                 day = to_combine_files_list.index(i) + 1  # 合并到第几天
@@ -107,7 +112,7 @@ def CMAQ_CombineWithISAM(
                 if to_combine_files_list.index(i) != 0:
                     data_now = np.concatenate((data_now, data_next), axis=0)
         if 'PM25' in combined_tagged_subs:
-            if x in ['FPM25AIT', 'FPM25ACC', 'FPM25COR']:  # 合并PM2.5计算参数，文件不一样
+            if x in PM25_DIAGpara:  # 合并PM2.5计算参数，文件不一样
                 for i in DIAG_files_list:
                     CONCf = nc.Dataset(CCTM_dir + i)
                     day = DIAG_files_list.index(i) + 1  # 合并到第几天
@@ -147,14 +152,14 @@ def CMAQ_CombineWithISAM(
                     dict(units=' ', long_name=i, var_desc=i)) # 计算系数无单位
             else:
                 emission_specie_var.setncatts(
-                    dict(units='ug/m-3', long_name=i, var_desc=i))  # 计算系数无单位
+                    dict(units='ug/m-3 or ppvm', long_name=i, var_desc=i))  # 计算系数无单位
         else:
             emission_specie_var.setncatts(
-                dict(units='ug/m-3', long_name=i, var_desc=i))  # 计算系数无单位
+                dict(units='ug/m-3 or ppvm', long_name=i, var_desc=i))  # 计算系数无单位
         emission_specie_var[:,:,:,:] = all_vars_lists[i][:, :, :, :]
 
     #若有PM25，进一步根据版本机制计算TAG的总PM
-    if 'PM25' in combined_tagged_subs:
+    if "PM25" in combined_tagged_subs:
         PM25_data_lists = []
         for i in ISAM_tags:
             PM25_data_lists.append('PM25' + i)
@@ -175,14 +180,19 @@ def CMAQ_CombineWithISAM(
             data_shape = np.array(COMBINE_file.variables[Combinevars[0]][:]).shape  # 获得数据shape来存放all
             PM25_data = np.zeros(data_shape, 'float64')  # PM25数组初始化
             for t in tqdm(range(0, data_shape[0]),desc="PM25" + tag_now + "每小时浓度计算..."):  # 每个小时的数据相加
-                PM25_AT_data = np.array(COMBINE_file.variables['FPM25AIT'][:])
-                PM25_AC_data = np.array(COMBINE_file.variables['FPM25ACC'][:])
-                PM25_CO_data = np.array(COMBINE_file.variables['FPM25COR'][:])
+                if CMAQISAM_version == "v53":
+                    PM25_AT_data = np.array(COMBINE_file.variables['PM25AT'][:])
+                    PM25_AC_data = np.array(COMBINE_file.variables['PM25AC'][:])
+                    PM25_CO_data = np.array(COMBINE_file.variables['PM25CO'][:])
+                if CMAQISAM_version == "v54":
+                    PM25_AT_data = np.array(COMBINE_file.variables['FPM25AIT'][:])
+                    PM25_AC_data = np.array(COMBINE_file.variables['FPM25ACC'][:])
+                    PM25_CO_data = np.array(COMBINE_file.variables['FPM25COR'][:])
                 PM25_AI_data = np.zeros(data_shape, 'float64')
                 PM25_AJ_data = np.zeros(data_shape, 'float64')  # PM25数组初始化
                 PM25_AK_data = np.zeros(data_shape, 'float64')
                 for i in all_vars_lists:
-                    if i not in ['FPM25AIT', 'FPM25ACC', 'FPM25COR']:
+                    if i not in PM25_DIAGpara:
                         if i in AI_tag:
                             PM_sub_data = np.array(COMBINE_file.variables[i][:])
                             PM25_AI_data[t, :, :, :] += PM_sub_data[t, :, :, :]
@@ -220,14 +230,24 @@ def CMAQ_CombineWithISAM(
 
 if __name__ == "__main__":
 
+    # CMAQ_CombineWithISAM(
+    #     start_date="2024-11-30",
+    #     CCTM_dir=r"E:\WCAS_serverfiles\cctm\cctm_emo3\\",
+    #     Combine_file_outdir=r"E:\WCAS_serverfiles\cctm\\cctmcombine_emo3.nc",
+    #     GRIDDECfile_dir=r"E:\WCAS_serverfiles\GRIDDESC",
+    #     GRIDNAME="CDsvSA_d03",
+    #     CMAQISAM_version="v53",
+    #     combined_tagged_subs=["O3"],
+    # )
+
     CMAQ_CombineWithISAM(
         start_date="2024-11-30",
-        CCTM_dir=r"E:\WCAS_serverfiles\cctm\cctm_emo3\\",
-        Combine_file_outdir=r"E:\WCAS_serverfiles\cctm\\cctmcombine_emo3.nc",
+        CCTM_dir=r"E:\WCAS_serverfiles\cctm\cctm_empm25\\",
+        Combine_file_outdir=r"E:\WCAS_serverfiles\cctm\\cctmcombine_empm25.nc",
         GRIDDECfile_dir=r"E:\WCAS_serverfiles\GRIDDESC",
         GRIDNAME="CDsvSA_d03",
         CMAQISAM_version="v53",
-        combined_tagged_subs=["O3"],
+        combined_tagged_subs=["PM25"],
     )
 
     pass

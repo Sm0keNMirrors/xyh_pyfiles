@@ -1,3 +1,9 @@
+"""
+Author: Xaohan Xian
+GitHub: https://github.com/Sm0keNMirrors
+Last update: 2024年12月24日
+"""
+
 import os
 import matplotlib
 import numpy as np

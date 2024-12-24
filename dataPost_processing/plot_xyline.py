@@ -1,3 +1,9 @@
+"""
+Author: Xaohan Xian
+GitHub: https://github.com/Sm0keNMirrors
+Last update:
+"""
+
 from matplotlib import pyplot as plt
 import datetime
 import os
