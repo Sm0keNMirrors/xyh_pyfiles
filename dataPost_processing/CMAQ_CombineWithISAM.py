@@ -1,9 +1,9 @@
 """
 Author: Yaohan Xian
 GitHub: https://github.com/Sm0keNMirrors
-Last update: 2024年12月24日
+Last update: 2024年12月25日
 """
-
+import multiprocessing
 import os
 import datetime
 import PseudoNetCDF as pnc
@@ -11,6 +11,49 @@ import netCDF4 as nc
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+
+
+def Multi_CombineVars(x,PM25_DIAGpara,to_combine_files_list,CCTM_dir,CCTM_day,all_vars_lists,combined_tagged_subs,DIAG_files_list):
+    """
+    用于多线程的函数
+    :return:
+    """
+    if x not in PM25_DIAGpara:  # 合并一般物质
+        for i in to_combine_files_list:
+            CONCf = nc.Dataset(CCTM_dir + i)
+            day = to_combine_files_list.index(i) + 1  # 合并到第几天
+            n_next = to_combine_files_list.index(i) + 1  # 下一天文件的index
+            if n_next >= CCTM_day:
+                all_vars_lists.update({x: data_now})  # 写入合并后的数据
+                break
+            CONCf_next = nc.Dataset(CCTM_dir + to_combine_files_list[n_next])
+
+            data_next = np.array(CONCf_next.variables[x][:])
+            if to_combine_files_list.index(i) == 0:
+                data_now = np.array(CONCf.variables[x][:])  # 首次输入文件
+                data_now = np.concatenate((data_now, data_next), axis=0)  # ACONC没有多的1h，不用删除处理
+
+            if to_combine_files_list.index(i) != 0:
+                data_now = np.concatenate((data_now, data_next), axis=0)
+    if 'PM25' in combined_tagged_subs:
+        if x in PM25_DIAGpara:  # 合并PM2.5计算参数，文件不一样
+            for i in DIAG_files_list:
+                CONCf = nc.Dataset(CCTM_dir + i)
+                day = DIAG_files_list.index(i) + 1  # 合并到第几天
+                n_next = DIAG_files_list.index(i) + 1  # 下一天文件的index
+                if n_next >= CCTM_day:
+                    all_vars_lists.update({x: data_now})  # 写入合并后的数据
+                    break
+                CONCf_next = nc.Dataset(CCTM_dir + DIAG_files_list[n_next])
+
+                data_next = np.array(CONCf_next.variables[x][:])
+
+                if DIAG_files_list.index(i) == 0:
+                    data_now = np.array(CONCf.variables[x][:])  # 首次输入文件
+                    data_now = np.concatenate((data_now, data_next), axis=0)  # ACONC没有多的1h，不用删除处理
+
+                if DIAG_files_list.index(i) != 0:
+                    data_now = np.concatenate((data_now, data_next), axis=0)
 
 def CMAQ_CombineWithISAM(
     start_date = "YYYY-MM-DD" ,#combine文件开始日期
@@ -20,6 +63,7 @@ def CMAQ_CombineWithISAM(
     GRIDNAME = "",# GRIDDESC中的gridname
     CMAQISAM_version = "", #版本不同决定了PM2.5的合并机制，有"v54" "v53"两种
     combined_tagged_subs = [], # 被标记的需要combine的物质的变量名称,'O3','PM25'等，其中PM25输入后会根据标记物质计算，而其他则直接由其变量名_tag合并 不需要计算
+    cores = 12,# 多线程运行核心数
 ):
     # 5.3版本CMAQISAM合并PM2.5的物种，物种不完全，仅能标记部分
     substance_PM25_CMAQv53 = ['ASO4I','ANO3I','ANH4I','ANAI','ACLI','AECI','AOTHRI',
@@ -59,6 +103,7 @@ def CMAQ_CombineWithISAM(
             print("若需要combinePM25，请输入CMAQISAM版本")
             return 1
     else:
+        PM25_DIAGpara = []
         Combine_substance = combined_tagged_subs
 
     # 准备好combine的文件群并查找变量信息
@@ -101,6 +146,7 @@ def CMAQ_CombineWithISAM(
                 n_next = to_combine_files_list.index(i) + 1  # 下一天文件的index
                 if n_next >= CCTM_day:
                     all_vars_lists.update({x: data_now})  # 写入合并后的数据
+                    CONCf.close()
                     break
                 CONCf_next = nc.Dataset(CCTM_dir + to_combine_files_list[n_next])
 
@@ -111,6 +157,8 @@ def CMAQ_CombineWithISAM(
 
                 if to_combine_files_list.index(i) != 0:
                     data_now = np.concatenate((data_now, data_next), axis=0)
+                CONCf_next.close()
+                CONCf.close()
         if 'PM25' in combined_tagged_subs:
             if x in PM25_DIAGpara:  # 合并PM2.5计算参数，文件不一样
                 for i in DIAG_files_list:
@@ -119,17 +167,28 @@ def CMAQ_CombineWithISAM(
                     n_next = DIAG_files_list.index(i) + 1  # 下一天文件的index
                     if n_next >= CCTM_day:
                         all_vars_lists.update({x: data_now})  # 写入合并后的数据
+                        CONCf.close()
                         break
                     CONCf_next = nc.Dataset(CCTM_dir + DIAG_files_list[n_next])
-    
+
                     data_next = np.array(CONCf_next.variables[x][:])
-    
+
                     if DIAG_files_list.index(i) == 0:
                         data_now = np.array(CONCf.variables[x][:])  # 首次输入文件
                         data_now = np.concatenate((data_now, data_next), axis=0)  # ACONC没有多的1h，不用删除处理
-    
+
                     if DIAG_files_list.index(i) != 0:
                         data_now = np.concatenate((data_now, data_next), axis=0)
+                    CONCf_next.close()
+                    CONCf.close()
+
+    # 进行文件组各类物种时间序列合并的过程（多线程）：
+    # pool = multiprocessing.Pool(cores)
+    # arg_pool = []
+    # for x in tqdm(Combinevars,desc="SAACONC被tag变量数据读取合并..."):
+    #     arg = (x,PM25_DIAGpara,to_combine_files_list,CCTM_dir,CCTM_day,all_vars_lists,combined_tagged_subs,DIAG_files_list)
+    #     arg_pool.append(arg)
+    # results = pool.starmap(Multi_CombineVars, arg_pool)
 
 
     # 以GRIDDESC创建CMAQnc文件作为combine的nc 并计算总PM25
@@ -240,14 +299,34 @@ if __name__ == "__main__":
     #     combined_tagged_subs=["O3"],
     # )
 
+    # CMAQ_CombineWithISAM(
+    #     start_date="2024-11-30",
+    #     CCTM_dir=r"E:\WCAS_serverfiles\cctm\cctm_empm25\\",
+    #     Combine_file_outdir=r"E:\WCAS_serverfiles\cctm\\cctmcombine_empm25.nc",
+    #     GRIDDECfile_dir=r"E:\WCAS_serverfiles\GRIDDESC",
+    #     GRIDNAME="CDsvSA_d03",
+    #     CMAQISAM_version="v53",
+    #     combined_tagged_subs=["PM25"],
+    # )
+
+    # CMAQ_CombineWithISAM(
+    #     start_date="2024-11-30",
+    #     CCTM_dir=r"E:\WCAS_serverfiles\cctm\cctm_repm25\\",
+    #     Combine_file_outdir=r"E:\WCAS_serverfiles\cctm\\cctmcombine_repm25.nc",
+    #     GRIDDECfile_dir=r"E:\WCAS_serverfiles\GRIDDESC",
+    #     GRIDNAME="CDsvSA_d03",
+    #     CMAQISAM_version="v53",
+    #     combined_tagged_subs=["PM25"],
+    # )
+
     CMAQ_CombineWithISAM(
         start_date="2024-11-30",
-        CCTM_dir=r"E:\WCAS_serverfiles\cctm\cctm_empm25\\",
-        Combine_file_outdir=r"E:\WCAS_serverfiles\cctm\\cctmcombine_empm25.nc",
+        CCTM_dir=r"E:\WCAS_serverfiles\cctm\cctm_reo3\\",
+        Combine_file_outdir=r"E:\WCAS_serverfiles\cctm\\cctmcombine_reo3.nc",
         GRIDDECfile_dir=r"E:\WCAS_serverfiles\GRIDDESC",
         GRIDNAME="CDsvSA_d03",
         CMAQISAM_version="v53",
-        combined_tagged_subs=["PM25"],
+        combined_tagged_subs=["O3"],
     )
 
     pass
