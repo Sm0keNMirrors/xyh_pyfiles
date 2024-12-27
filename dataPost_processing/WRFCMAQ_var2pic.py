@@ -105,6 +105,7 @@ def WRFCMAQ_var2pic(
     WRFout_files2_dir = "",
     CMAQcombine_file2_dir = "", # 仅给出
     difresult_data_types=['allmean'], # 差值输出结果图的包含哪些平均结果，暂时仅支持allmean
+    difresult_forceminmax = [], # 强制修正对应变量差值结果图的最大最小值，即部分异常值，[A,B] 或False格式 A最小修正 B为最大修正
     difpic_title = "", # 差值图自定义标题，表示哪两次模拟的
 ):
     os.makedirs(out_dir, exist_ok=True)
@@ -199,6 +200,14 @@ def WRFCMAQ_var2pic(
                     if ifpicdif == True:
                         vardata2 = np.sqrt(input_vars_get2['V10'] ** 2 + input_vars_get2['U10'] ** 2)  # 分速度求和速度
                         output_vars2.update({var: vardata2})
+                if var == 'VC':
+                    vardata = np.sqrt(input_vars_get['V10'] ** 2 + input_vars_get['U10'] ** 2) * input_vars_get['PBLH']
+                    output_vars.update({var: vardata})
+                    if ifpicdif == True:
+                        vardata2 = np.sqrt(input_vars_get2['V10'] ** 2 + input_vars_get2['U10'] ** 2)  * input_vars_get2['PBLH']
+                        output_vars2.update({var: vardata2})
+
+
 
                 # =====================😼😼😼😼😼😼😼😼😼########😼😼😼😼😼😼😼😼😼😼😼😼😼=====================
     hourly_datas,daily_datas,allmean_datas = {},{},{} # 用于输出直接的array结果
@@ -514,6 +523,11 @@ def WRFCMAQ_var2pic(
                         allmeandata2 += output_vars2[var][hour, :, :]
                     allmeandata2 /= 24 * daycount
                     allmeandatadif = allmeandata1 - allmeandata2
+
+                if difresult_forceminmax[index] != False:
+                    allmeandatadif[allmeandatadif >= difresult_forceminmax[1]] = difresult_forceminmax[1]
+                    allmeandatadif[allmeandatadif <= difresult_forceminmax[0]] = difresult_forceminmax[0]
+
                 if cbar_min_max == []:
                     cbarmax = np.ceil(np.max(allmeandatadif) / 10) * 10
                     cbarmin = np.floor(np.min(allmeandatadif) / 10) * 10
@@ -584,150 +598,6 @@ def WRFCMAQ_var2pic(
 if __name__ == '__main__':
 
 
-    # WRFCMAQ_var2pic(
-    #     start_date='2022-08-18',
-    #     daycount=4,
-    #     WRFout_files_dir=r'E:\LQSlanduse\2022_summer\d03\\',
-    #     CMAQcombine_inithour=16,
-    #     CMAQcombine_file_dir=r"E:\LQSlanduse\2022_summer\COMBINE_ACONC_v532_gcc_20220818_202208.nc",
-    #     GRIDCRO2D_file_dir=r"E:\LQSlanduse\GRIDCRO2D_2022230.nc",
-    #     WRFout_files_winddata_dir=r'E:\LQSlanduse\2022_summer\d02\\',
-    #     shp_files_dir='E:\CMAQdata_chengdu202208\shps\\',
-    #     input_vars={'WRF':['PBLH','PSFC','Q2','T2','V10','U10',],'CMAQ':['O3','PM25_TOT']},
-    #     target_vars={'direct':['PBLH','O3','PM25_TOT'],'indirect':['T2_C','WS','RH',]},
-    #     target_vars_ifdrawwind = [False,False,False,False,True,False],
-    #     target_vars_cmap=['jet','pollution','pollution','rainbow','rainbow','ocean',],
-    #     target_vars_unit=['m','μg/m$^{3}$','μg/m$^{3}$','℃','m/s','%'],
-    #     target_vars_cbarticksFormat = ['%i','%i','%i','%.1f','%.1f','%i',],
-    #     target_vars_name=['边界层高度','O$_{3}$','PM$_{25}$','温度','风速','相对湿度'],
-    #     Molar_mass={'O3':48},
-    #
-    #     result_pic_type='pcolormesh',
-    #     # bgimage_dir_alpha = [r"E:\ArcGISfiles\WRFdomain_300mRGB.tif",0.75,[95, 113, 23, 37]],
-    #     fig_size = (6, 9),
-    #     cbar_positions=['horizontal',[0.1, 0.1, 0.8, 0.025]],
-    #     result_positions=[0.12,0.88,0.15,0.95,0.2,0.2],
-    #     wind_scale = [5,0.003],
-    #
-    #     result_data_types=['allmean'],
-    #     out_dir=r'E:\LQSlanduse\picout\\2022_summer\\',
-    #     suffix='2022_summer',
-    #
-    #     ifpicdif=True,
-    #     WRFout_files2_dir=r'E:\LQSlanduse\2020_summer\d03\\',
-    #     CMAQcombine_file2_dir=r"E:\LQSlanduse\2020_summer\COMBINE_ACONC_v532_gcc_20220818_202208.nc",  # 仅给出
-    #     difresult_data_types=['allmean'],  # 差值输出结果图的包含哪些平均结果，暂时仅支持allmean
-    #     difpic_title="2020夏季到2022夏季",  # 差值图自定义标题，表示哪两次模拟的
-    # )
-
-    # 仅输出完整气象场变化
-    for s in ['2020','2022']:
-        WRFCMAQ_var2pic(
-            start_date='2022-08-18',
-            daycount=6,
-            WRFout_files_dir=rf'E:\LQSlanduse\{s}_summer\d03\\',
-            CMAQcombine_inithour=16,
-            CMAQcombine_file_dir="",
-            GRIDCRO2D_file_dir=r"E:\LQSlanduse\GRIDCRO2D_2022230.nc",
-            WRFout_files_winddata_dir=rf'E:\LQSlanduse\{s}_summer\d02\\',
-            shp_files_dir='E:\CMAQdata_chengdu202208\shps\\',
-            input_vars={'WRF': ['PBLH', 'PSFC', 'Q2', 'T2', 'V10', 'U10', ],},
-            target_vars={'direct': ['PBLH'], 'indirect': ['T2_C', 'WS', 'RH', ]},
-            target_vars_ifdrawwind=[False, False, True, False],
-            target_vars_cmap=['jet','rainbow', 'rainbow', 'ocean', ],
-            target_vars_unit=['m','℃', 'm/s', '%'],
-            target_vars_cbarticksFormat=['%i', '%.1f', '%.1f', '%i', ],
-            target_vars_name=['边界层高度', '温度', '风速', '相对湿度'],
-
-            result_pic_type='pcolormesh',
-            # bgimage_dir_alpha = [r"E:\ArcGISfiles\WRFdomain_300mRGB.tif",0.75,[95, 113, 23, 37]],
-            fig_size=(6, 9),
-            cbar_positions=['horizontal', [0.1, 0.1, 0.8, 0.025]],
-            result_positions=[0.12, 0.88, 0.15, 0.95, 0.2, 0.2],
-            wind_scale=[10, 0.003],
-
-            result_data_types=['hourly','daily'],
-            out_dir=rf'E:\LQSlanduse\picout\\{s}_summer\\',
-            suffix=f'{s}_summer',
-
-            ifpicdif=True,
-            WRFout_files2_dir=rf'E:\LQSlanduse\{s}_summer\d03\\',
-            CMAQcombine_file2_dir="",
-            difresult_data_types=['allmean'],  # 差值输出结果图的包含哪些平均结果，暂时仅支持allmean
-            difpic_title="2020夏季到2022夏季",  # 差值图自定义标题，表示哪两次模拟的
-        )
-
-    for s in ['2020', '2022']:
-        WRFCMAQ_var2pic(
-            start_date='2023-12-27',
-            daycount=6,
-            WRFout_files_dir=rf'E:\LQSlanduse\{s}_winter\d03\\',
-            CMAQcombine_inithour=16,
-            CMAQcombine_file_dir="",
-            GRIDCRO2D_file_dir=r"E:\LQSlanduse\GRIDCRO2D_2022230.nc",
-            WRFout_files_winddata_dir=rf'E:\LQSlanduse\{s}_winter\d02\\',
-            shp_files_dir='E:\CMAQdata_chengdu202208\shps\\',
-            input_vars={'WRF': ['PBLH', 'PSFC', 'Q2', 'T2', 'V10', 'U10', ], },
-            target_vars={'direct': ['PBLH'], 'indirect': ['T2_C', 'WS', 'RH', ]},
-            target_vars_ifdrawwind=[False, False, True, False],
-            target_vars_cmap=['jet', 'rainbow', 'rainbow', 'ocean', ],
-            target_vars_unit=['m', '℃', 'm/s', '%'],
-            target_vars_cbarticksFormat=['%i', '%.1f', '%.1f', '%i', ],
-            target_vars_name=['边界层高度', '温度', '风速', '相对湿度'],
-
-            result_pic_type='pcolormesh',
-            # bgimage_dir_alpha = [r"E:\ArcGISfiles\WRFdomain_300mRGB.tif",0.75,[95, 113, 23, 37]],
-            fig_size=(6, 9),
-            cbar_positions=['horizontal', [0.1, 0.1, 0.8, 0.025]],
-            result_positions=[0.12, 0.88, 0.15, 0.95, 0.2, 0.2],
-            wind_scale=[10, 0.003],
-
-            result_data_types=['hourly', 'daily',],
-            out_dir=rf'E:\LQSlanduse\picout\\{s}_winter\\',
-            suffix=f'{s}_winter',
-
-            ifpicdif=True,
-            WRFout_files2_dir=rf'E:\LQSlanduse\{s}_winter\d03\\',
-            CMAQcombine_file2_dir="",
-            difresult_data_types=['allmean'],  # 差值输出结果图的包含哪些平均结果，暂时仅支持allmean
-            difpic_title="2020冬季到2022冬季",  # 差值图自定义标题，表示哪两次模拟的
-        )
-
-    # WRFCMAQ_var2pic(
-    #     start_date='2023-12-26',
-    #     daycount=4,
-    #     WRFout_files_dir=r'E:\LQSlanduse\2022_winter\d03\\',
-    #     CMAQcombine_inithour=16,
-    #     CMAQcombine_file_dir=r"E:\LQSlanduse\2022_winter\COMBINE_ACONC_v532_gcc_20231227_202312.nc",
-    #     GRIDCRO2D_file_dir=r"E:\LQSlanduse\GRIDCRO2D_2022230.nc",
-    #     WRFout_files_winddata_dir=r'E:\LQSlanduse\2022_winter\d02\\',
-    #     shp_files_dir='E:\CMAQdata_chengdu202208\shps\\',
-    #     input_vars={'WRF': ['PBLH', 'PSFC', 'Q2', 'T2', 'V10', 'U10', ], 'CMAQ': ['O3', 'PM25_TOT']},
-    #     target_vars={'direct': ['PBLH', 'O3', 'PM25_TOT'], 'indirect': ['T2_C', 'WS', 'RH', ]},
-    #     target_vars_ifdrawwind=[False, False, False, False, True, False],
-    #     target_vars_cmap=['jet', 'pollution', 'pollution', 'rainbow', 'rainbow', 'ocean', ],
-    #     target_vars_unit=['m', 'μg/m$^{3}$', 'μg/m$^{3}$', '℃', 'm/s', '%'],
-    #     target_vars_cbarticksFormat=['%i', '%i', '%i', '%.1f', '%.1f', '%i', ],
-    #     target_vars_name=['边界层高度', 'O$_{3}$', 'PM$_{25}$', '温度', '风速', '相对湿度'],
-    #     Molar_mass={'O3': 48},
-    #
-    #     result_pic_type='pcolormesh',
-    #     # bgimage_dir_alpha = [r"E:\ArcGISfiles\WRFdomain_300mRGB.tif",0.75,[95, 113, 23, 37]],
-    #     fig_size=(6, 9),
-    #     cbar_positions=['horizontal', [0.1, 0.1, 0.8, 0.025]],
-    #     result_positions=[0.12, 0.88, 0.15, 0.95, 0.2, 0.2],
-    #     wind_scale=[5, 0.003],
-    #
-    #     result_data_types=['allmean'],
-    #     out_dir=r'E:\LQSlanduse\picout\\2022_winter\\',
-    #     suffix='2022_winter',
-    #
-    #     ifpicdif=True,
-    #     WRFout_files2_dir=r'E:\LQSlanduse\2020_winter\d03\\',
-    #     CMAQcombine_file2_dir=r"E:\LQSlanduse\2020_winter\COMBINE_ACONC_v532_gcc_20231227_202312.nc",  # 仅给出
-    #     difresult_data_types=['allmean'],  # 差值输出结果图的包含哪些平均结果，暂时仅支持allmean
-    #     difpic_title="2020冬季到2022冬季",  # 差值图自定义标题，表示哪两次模拟的
-    # )
 
     pass
 
