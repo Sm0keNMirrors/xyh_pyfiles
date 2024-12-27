@@ -99,6 +99,7 @@ def WRFCMAQ_var2pic(
 
     out_dir = "",
     return2array = False, #是否不输出图像，直接将结果输出成array数组，用于其他分析或者特殊绘图
+    save2npy = False, # 是否将计算出的各类均值变量输出为npy文件，方便后续其他处理，默认输出到图片位置路径
     suffix = "",
 
     ifpicdif = False, # 是否绘制差值图像，即上面所有相关变量，基于下面的输入数据为减数的差值图输出，
@@ -306,6 +307,7 @@ def WRFCMAQ_var2pic(
                 gl.ylabel_style = {'size': 15}  # 设置纬度标签字体大小
                 plt.savefig(hourly_var_out_dir+f'{var} {str(date_now)}'.replace(':',"-"))
                 plt.close()
+                if save2npy: np.save(hourly_var_out_dir + f'{var} {str(date_now)}.npy'.replace(':', "-"), hourlydata)
 
     if 'daily' in result_data_types:
         start_date_o = datetime.strptime(start_date, '%Y-%m-%d')
@@ -398,6 +400,7 @@ def WRFCMAQ_var2pic(
                 gl.ylabel_style = {'size': 15}  # 设置纬度标签字体大小
                 plt.savefig(daily_var_out_dir+f'{var} {str(date_now)}'.replace(':',"-"))
                 plt.close()
+                if save2npy: np.save(daily_var_out_dir + f'{var} {str(date_now)}.npy'.replace(':', "-"), dailydata)
 
     if 'allmean' in result_data_types:
         start_date_o = datetime.strptime(start_date, '%Y-%m-%d')
@@ -490,6 +493,8 @@ def WRFCMAQ_var2pic(
                 gl.ylabel_style = {'size': 15}  # 设置纬度标签字体大小
                 plt.savefig(allmean_var_out_dir+f'{var} allmean'.replace(':',"-"))
                 plt.close()
+                if save2npy: np.save(allmean_var_out_dir + f'{var} allmean.npy'.replace(':', "-"), allmeandata)
+
 
     if return2array == True:
         return [hourly_datas,daily_datas,allmean_datas]
@@ -525,8 +530,8 @@ def WRFCMAQ_var2pic(
                     allmeandatadif = allmeandata1 - allmeandata2
 
                 if difresult_forceminmax[index] != False:
-                    allmeandatadif[allmeandatadif >= difresult_forceminmax[1]] = difresult_forceminmax[1]
-                    allmeandatadif[allmeandatadif <= difresult_forceminmax[0]] = difresult_forceminmax[0]
+                    allmeandatadif[allmeandatadif >= difresult_forceminmax[index][1]] = difresult_forceminmax[index][1]
+                    allmeandatadif[allmeandatadif <= difresult_forceminmax[index][0]] = difresult_forceminmax[index][0]
 
                 if cbar_min_max == []:
                     cbarmax = np.ceil(np.max(allmeandatadif) / 10) * 10
@@ -589,8 +594,9 @@ def WRFCMAQ_var2pic(
                 ax.set_title(f'{difpic_title}{target_vars_name[index]}模拟时段总均值变化量',fontsize=15,pad=30)
                 gl.xlabel_style = {'size': 15}  # 设置经度标签字体大小
                 gl.ylabel_style = {'size': 15}  # 设置纬度标签字体大小
-                plt.savefig(allmean_var_out_dir+f'{var} allmean'.replace(':',"-"))
+                plt.savefig(allmean_var_out_dir+f'{var} allmeandif'.replace(':',"-"))
                 plt.close()
+                if save2npy: np.save(allmean_var_out_dir+f'{var} allmeandif.npy'.replace(':', "-"), allmeandatadif)
 
 
 
