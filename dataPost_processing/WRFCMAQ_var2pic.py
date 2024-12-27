@@ -597,7 +597,5 @@ def WRFCMAQ_var2pic(
 
 if __name__ == '__main__':
 
-
-
     pass
 
