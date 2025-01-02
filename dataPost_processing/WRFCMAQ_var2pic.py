@@ -1,7 +1,7 @@
 """
 Author: Yaohan Xian
 GitHub: https://github.com/Sm0keNMirrors
-Last update: 2024年12月24日
+Last update: 2025年1月2日
 """
 
 import os
@@ -95,11 +95,12 @@ def WRFCMAQ_var2pic(
     cbar_positions = ['horizontal',[0.1, 0.1, 0.8, 0.025]], # color的位置信息，[水平垂直信息, axe信息]
     result_positions = [0.12,0.88,0.2,0.95,0.2,0.2], # 经纬度图的绘制位置信息，即plt.subplots_adjust(left=0.12, right=0.88, bottom=0.2, top=0.95, wspace=0.2, hspace=0.2)的参数，
     result_pic_type='', #输出结果图类型contourf, pcolormesh
+    manmual_extent = [], # 手动设置ax显示的经纬度范围，若为默认的[]，则是直接以nc经纬度的范围输出
     wind_scale = [5,0.003], # 风向箭头大小数据，scale和width，单位为inches
 
     out_dir = "",
     return2array = False, #是否不输出图像，直接将结果输出成array数组，用于其他分析或者特殊绘图
-    save2npy = False, # 是否将计算出的各类均值变量输出为npy文件，方便后续其他处理，默认输出到图片位置路径
+    save2npy = False, # 是否将计算出的各类均值变量输出为npy文件，方便后续其他处理，默认输出到图片位置路径，同时保存绘图的x y LATLONG
     suffix = "",
 
     ifpicdif = False, # 是否绘制差值图像，即上面所有相关变量，基于下面的输入数据为减数的差值图输出，
@@ -153,6 +154,13 @@ def WRFCMAQ_var2pic(
     cmap_pollution = colors.LinearSegmentedColormap.from_list("name", cmapdict)
     target_vars_cmap_ = [cmap_pollution if x == 'pollution' else x for x in target_vars_cmap]
 
+    lon_c = lon[0:lon.shape[0] - 2, 0:lon.shape[1] - 2]
+    lat_c = lat[0:lat.shape[0] - 2, 0:lat.shape[1] - 2]
+    if save2npy: np.save(out_dir + f'LONG_cmaq.npy'.replace(':', "-"), lon_c.filled(fill_value=0))
+    if save2npy: np.save(out_dir + f'LAT_cmaq.npy'.replace(':', "-"), lat_c.filled(fill_value=0))
+    if save2npy: np.save(out_dir + f'LONG_wrf.npy'.replace(':', "-"), lon.filled(fill_value=0))
+    if save2npy: np.save(out_dir + f'LAT_wrf.npy'.replace(':', "-"), lat.filled(fill_value=0))
+
 
     input_vars_get = {}
     if ifpicdif == True: input_vars_get2 = {}
@@ -174,12 +182,11 @@ def WRFCMAQ_var2pic(
                 output_vars.update({var:input_vars_get[var]})
                 if ifpicdif == True:output_vars2.update({var:input_vars_get2[var]})
     for type in target_vars:
+        if target_vars['indirect'] == []: continue
         if type == 'indirect':
             for var in target_vars[type]:
                 # 输入对应indirect的变量的计算方法，通过确定的input变量来计算,如RH，ISAM总浓度等
                 # =====================😼😼😼😼😼😼😼😼😼########😼😼😼😼😼😼😼😼😼😼😼😼😼=====================
-
-
 
                 if var == 'RH':
                     vardata = 0.236 * input_vars_get['PSFC'] * input_vars_get['Q2'] * np.exp(
@@ -194,6 +201,12 @@ def WRFCMAQ_var2pic(
                     output_vars.update({var: vardata})
                     if ifpicdif == True:
                         vardata2 = input_vars_get2['T2'] - 273.15
+                        output_vars2.update({var: vardata2})
+                if var == 'TSK_C':
+                    vardata = input_vars_get['TSK'] - 273.15
+                    output_vars.update({var: vardata})
+                    if ifpicdif == True:
+                        vardata2 = input_vars_get2['TSK'] - 273.15
                         output_vars2.update({var: vardata2})
                 if var == 'WS':
                     vardata = np.sqrt(input_vars_get['V10'] ** 2 + input_vars_get['U10'] ** 2)  # 分速度求和速度
@@ -285,6 +298,7 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                if manmual_extent != []:ax.set_extent(manmual_extent)  # 显示范围 当需要强制控制时修改
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
@@ -373,6 +387,7 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                if manmual_extent != []: ax.set_extent(manmual_extent)  # 显示范围 当需要强制控制时修改
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
@@ -467,6 +482,7 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                if manmual_extent != []: ax.set_extent(manmual_extent)  # 显示范围 当需要强制控制时修改
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
@@ -494,7 +510,6 @@ def WRFCMAQ_var2pic(
                 plt.savefig(allmean_var_out_dir+f'{var} allmean'.replace(':',"-"))
                 plt.close()
                 if save2npy: np.save(allmean_var_out_dir + f'{var} allmean.npy'.replace(':', "-"), allmeandata)
-
 
     if return2array == True:
         return [hourly_datas,daily_datas,allmean_datas]
@@ -579,6 +594,7 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                if manmual_extent != []: ax.set_extent(manmual_extent)  # 显示范围 当需要强制控制时修改
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
                 cb.ax.tick_params(labelsize=17)  # 刻度字体大小
@@ -602,7 +618,6 @@ def WRFCMAQ_var2pic(
 
 
 if __name__ == '__main__':
-
 
 
     pass
