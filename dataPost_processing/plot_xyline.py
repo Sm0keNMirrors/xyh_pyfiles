@@ -1,15 +1,11 @@
 """
 Author: Yaohan Xian
 GitHub: https://github.com/Sm0keNMirrors
-Last update:
+Last update: 2025年1月8日
 """
 
-from matplotlib import pyplot as plt
-import datetime
-import os
 import matplotlib.dates as mdates
 import numpy as np
-import pandas as pd
 from matplotlib import font_manager, rcParams, pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
@@ -29,8 +25,12 @@ def plot_xyline(
     figaxe = [0.12, 0.2, 0.7, 0.7],
     x_y_labels = [],
     title = "",
+    fontsize = 13,
+
     filename = "",
     outputdir = "",
+    font_dir = "",
+
     xdata_dateformat = '', #
     xdata_numberformat = 0, #
     xdata_customticks = [],
@@ -49,8 +49,10 @@ def plot_xyline(
     :param figaxe:  图像轴绘制范围
     :param x_y_labels: 图像绘制的xy名称
     :param title: 图像标题
+    :param fontsize: 字体大小
     :param filename: 图像保存的名称 不带拓展名
     :param outputdir: 输出的路径
+    :param font_dir: 指定特殊绘图整体的字体类型，如想中英文同时存在必须导入times+simsun.ttf，不指名则为matplotlib默认字体
     :param xdata_dateformat: 若X轴数据是日期，设置其显示格式 如%m-%d 可选参数
     :param xdata_numberformat: 若x轴数据是数值，设置其ticks数值间隔 可选参数
     :param xdata_customticks: 让x轴制定显示几个信息，如31*7个x轴数据，显示为[2002, 2005, 2008, 2011, 2014, 2017, 2020]，输入参数格式为[xdata(一个),显示信息个数，[显示信息数组]]
@@ -58,16 +60,18 @@ def plot_xyline(
     :return:
     """
 
-
     def format_y_ticks(y, pos):
         return f'{y:.{y_ticks_decimal}f}'  # 保留两位小数
     # 字体设置
-    font_path = r"D:\Fonts\times+simsun.ttf"
-    font_manager.fontManager.addfont(font_path)
-    prop = font_manager.FontProperties(fname=font_path)
+    if font_dir != "":
+        # font_dir = r"D:\Fonts\times+simsun.ttf"
+        font_manager.fontManager.addfont(font_dir)
+        prop = font_manager.FontProperties(fname=font_dir)
+        rcParams['font.sans-serif'] = prop.get_name()  # 根据名称设置字体
+    else:
+        prop = None
     rcParams['font.family'] = 'sans-serif'  # 使用字体中的无衬线体
-    rcParams['font.sans-serif'] = prop.get_name()  # 根据名称设置字体
-    rcParams['font.size'] = 13  # 设置字体大小
+    rcParams['font.size'] = fontsize  # 设置字体大小
     rcParams['axes.unicode_minus'] = False  # 使坐标轴刻度标签正常显示正负号
 
     max_value = y_max_min[0]
@@ -90,10 +94,10 @@ def plot_xyline(
                 linewidth=data_linewidths[i], label=data_labels[i], linestyle=data_linestyles[i])  # 要用legend画图例，这里必须,=
         lines.append(linex)
 
-    plt.legend(handles=lines, loc='upper left', fontsize=7, bbox_to_anchor=(1, 1))
-    ax.set_ylabel(x_y_labels[1], fontsize=7)
-    ax.set_xlabel(x_y_labels[0], fontsize=7)
-    plt.title(title, fontsize=7)
+    plt.legend(handles=lines, loc='upper left', fontsize=fontsize, bbox_to_anchor=(1, 1))
+    ax.set_ylabel(x_y_labels[1], fontsize=fontsize)
+    ax.set_xlabel(x_y_labels[0], fontsize=fontsize)
+    plt.title(title, fontsize=fontsize)
     plt.ylim(min_value, max_value)  # y轴 高度范围
     plt.yticks(y_)
     plt.gca().yaxis.set_major_formatter(FuncFormatter(format_y_ticks))
@@ -101,8 +105,8 @@ def plot_xyline(
     # 为每个y轴刻度画虚线
     for ytick in yticks:
         plt.axhline(y=ytick, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-    plt.xticks(fontsize=7)  # xticks必须在这个位置才生效
-    plt.yticks(fontsize=7)
+    plt.xticks(fontsize=fontsize)  # xticks必须在这个位置才生效
+    plt.yticks(fontsize=fontsize)
     if xdata_dateformat != '': ax.xaxis.set_major_formatter(mdates.DateFormatter(xdata_dateformat))  # 设置日期显示间隔
     if xdata_numberformat != 0: plt.xticks(np.arange(0, len(xdata[0])+1, xdata_numberformat))  # 设置数值显示间隔
     if xdata_customticks != []:
