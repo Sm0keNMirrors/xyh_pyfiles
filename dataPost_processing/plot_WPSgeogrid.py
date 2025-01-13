@@ -1,9 +1,8 @@
 """
 Author: Yaohan Xian
 GitHub: https://github.com/Sm0keNMirrors
-Last update: 2025年1月8日
+Last update: 2025年1月13日
 """
-
 import numpy as np
 import netCDF4 as nc
 import cartopy.crs as ccrs
@@ -26,6 +25,18 @@ def plot_WPSgeogrid(   # 绘制geogrid的嵌套结果，让用户检查是否合
     :param geogrid_picout_dir: 输出的绘图结果所在的路径
     :return:
     """
+
+    def check_directory(directory_path, arg):
+        try:
+            # 检查目录是否存在且是一个目录
+            if os.path.isdir(directory_path):
+                pass
+            else:
+                print(f"目录无效: 参数{arg} {directory_path} 不存在或不是一个目录")
+        except Exception as e:
+            # 捕获其他可能的异常，并打印错误信息
+            print(f"检查目录时出错: {str(e)}")
+
     def getArrayVertices(ARR):
         top_left = ARR[0, 0]
         top_right = ARR[0, ARR.shape[1] - 1]
@@ -33,11 +44,16 @@ def plot_WPSgeogrid(   # 绘制geogrid的嵌套结果，让用户检查是否合
         bottom_right = ARR[ARR.shape[0] - 1, ARR.shape[1] - 1]
         return [top_left, top_right, bottom_left, bottom_right]
 
+    check_directory(geo_em_files_dir,"geo_em_files_dir")
+    check_directory(shpfiles_dir,"shpfiles_dir")
+
     shpfiles_pr = os.listdir(shpfiles_dir)
     shpfiles = []
     for f in shpfiles_pr:
         if f[-4:] == ".shp":
             shpfiles.append(shpfiles_dir+f)
+    if shpfiles == []:
+        print('提示：未发现有效shp文件！')
 
     # --创建画图空间
     proj = ccrs.PlateCarree()  # 创建坐标系
@@ -49,6 +65,8 @@ def plot_WPSgeogrid(   # 绘制geogrid的嵌套结果，让用户检查是否合
     for x in geo_file_list_:
         if "geo_em" in x:
             geo_file_list.append(x)
+    if geo_file_list == []:
+        print('警告：未发现geo_em命名的geogrid.exe输出文件！')
     geo_file_list.sort()
     domains_n = len(geo_file_list)  # 嵌套区域数
     domain_rectangles = []
@@ -76,7 +94,9 @@ def plot_WPSgeogrid(   # 绘制geogrid的嵌套结果，让用户检查是否合
         ax.add_patch(i)
     # --设置网格点属性
     gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.2, color='k', alpha=0.5, linestyle='--')
+    os.makedirs(geogrid_picout_dir, exist_ok=True)
     plt.savefig(geogrid_picout_dir+"geogrid.png")
+    print('运行完成。结果输出到'+geogrid_picout_dir+"geogrid.png")
 
 
 if __name__ == "__main__":
