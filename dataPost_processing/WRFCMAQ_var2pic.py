@@ -1,19 +1,56 @@
 """
 Author: Yaohan Xian
 GitHub: https://github.com/Sm0keNMirrors
-Last update: 2025年1月2日
+Last update: 2025年1月14日
 """
 
 import os
+import re
+
 import matplotlib
 import numpy as np
 import netCDF4 as nc
 from tqdm import tqdm
+import rasterio
+from rasterio.transform import from_origin
 import cartopy.crs as ccrs
 from matplotlib import colors, font_manager, rcParams, pyplot as plt
 import cartopy.feature as cfeat
 from cartopy.io.shapereader import Reader
 from datetime import datetime, timedelta
+
+
+def save_2tiff(out_path, tif_data, ROW, COL, lonmin, lon_res, latmax, lat_res):
+    # 创建GeoTIFF文件
+    transform = from_origin(lonmin, latmax, lon_res, lat_res)  # 设置变换参数
+
+    with rasterio.open(
+            out_path, 'w',
+            driver='GTiff',
+            height=ROW,
+            width=COL,
+            count=1,
+            dtype='float32',  # 数据类型
+            crs='EPSG:4326',  # 设置坐标系为 WGS 84
+            transform=transform
+    ) as dst:
+        dst.write(tif_data, 1)  # 将数据写入第一波段
+
+
+def translate_expression_and_evaluate(expression,input_vars_get,np):  # 对公式进行表达式的切换
+    # 替换表达式中的变量
+    converted_expression = re.sub(r'~(.*?)~', r'input_vars_get["\1"]', expression)
+
+    # 使用eval来计算表达式
+    result = eval(converted_expression, {"np": np, "input_vars_get": input_vars_get})
+    return result
+
+def translate_expression_and_evaluate_2(expression,input_vars_get2,np):  # 对公式进行表达式的切换
+    # 替换表达式中的变量
+    converted_expression = re.sub(r'~(.*?)~', r'input_vars_get2["\1"]', expression)
+    # 使用eval来计算表达式
+    result = eval(converted_expression, {"np": np, "input_vars_get": input_vars_get2})
+    return result
 
 def getArrayVertices(ARR):
     top_left = ARR[0, 0]
@@ -82,6 +119,7 @@ def WRFCMAQ_var2pic(
     bgimage_dir_alpha = ["",0.5], # 是否添加底图tiff，以及添加后结果图的透明度,底图tiff经纬度原始范围
     input_vars ={'WRF':[],'CMAQ':[]}, # {'WRF':[],'CMAQ':[]}读取的变量，用于输出或者计算最终输出变量，来源模型:变量组
     target_vars = {'direct':[],'indirect':[]}, # 输出的变量，direct：直接读取后输出，indirect：计算后输出，计算方式即对应输出变量名称自行在函数中添加
+    indirect_vars_fomular = {'RH' : "0.236 * ~PSFC~ * ~Q2~ * np.exp((17.67 * (~T2~ - 273.15)) / (~T2~ - 29.65)) ** (-1)"}, # indirect变量的计算公式，例如：'RH' : "0.236 * ~PSFC~ * ~Q2~ * np.exp((17.67 * (~T2~ - 273.15)) / (~T2~ - 29.65)) ** (-1)"
     target_vars_ifdrawwind = [], # 对应上面每个输出变量的图，哪个输出风向箭头，参数为布尔值序列[True,False,False]
     target_vars_cmap = [], # 输出变量的颜色条类型，依照target_vars顺序输入，包括常用的：jet、rainbow、pollution
     target_vars_unit = [], # 输出变量的单位，依照target_vars顺序输入，有μg/m$^{3}$，℃，m等
@@ -99,11 +137,11 @@ def WRFCMAQ_var2pic(
     wind_scale = [5,0.003], # 风向箭头大小数据，scale和width，单位为inches
 
     out_dir = "",
-    return2array = False, #是否不输出图像，直接将结果输出成array数组，用于其他分析或者特殊绘图
     save2npy = False, # 是否将计算出的各类均值变量输出为npy文件，方便后续其他处理，默认输出到图片位置路径，同时保存绘图的x y LATLONG
+    save2tiff = False, # 是否将计算出的各类均值变量输出为tiff文件，方便后续其他处理，默认输出到图片位置路径
     suffix = "",
 
-    ifpicdif = False, # 是否绘制差值图像，即上面所有相关变量，基于下面的输入数据为减数的差值图输出，
+    ifpicdif = False, # 是否绘制差值图像，即上面所有相关变量输入数据为被减数，基于下面的输入数据为减数的差值图输出，要求作差的两次数据格式一致
     WRFout_files2_dir = "",
     CMAQcombine_file2_dir = "", # 仅给出
     difresult_data_types=['allmean'], # 差值输出结果图的包含哪些平均结果，暂时仅支持allmean
@@ -128,6 +166,16 @@ def WRFCMAQ_var2pic(
         ROW = np.array(WRFoutf.variables["XLAT"]).shape[1]  # 获得数据格式shape1
         COL = np.array(WRFoutf.variables["XLAT"]).shape[2]  # 获得数据格式shape2
         WRFoutf.close()
+
+        # 用于输出tiff的参数 for WRF
+        WRF_lonmin, WRF_latmax, WRF_lonmax, WRF_latmin = (lon.min(), lat.max(),lon.max(), lat.min())
+        len_lat = ROW
+        len_lon = COL
+        WRF_ROW = ROW
+        WRF_COL = COL
+        WRF_lon_res = (WRF_lonmax - WRF_lonmin) / (len_lon - 1.0)
+        WRF_lat_res = (WRF_latmax - WRF_latmin) / (len_lat - 1.0)
+
     # if GRIDCRO2D_file_dir != "": # 有gridcro2d就以其作为两个模型的grid
     #     lon = GRIDCRO2D.variables['LON'][:][0][0]
     #     lat = GRIDCRO2D.variables['LAT'][:][0][0]
@@ -156,6 +204,14 @@ def WRFCMAQ_var2pic(
 
     lon_c = lon[0:lon.shape[0] - 2, 0:lon.shape[1] - 2]
     lat_c = lat[0:lat.shape[0] - 2, 0:lat.shape[1] - 2]
+    # 用于输出tiff的参数 for CMAQ
+    CMAQ_lonmin, CMAQ_latmax, CMAQ_lonmax, CMAQ_latmin = (lon_c.min(), lat_c.max(), lon_c.max(), lat_c.min())
+    len_lat = ROW
+    len_lon = COL
+    CMAQ_ROW = ROW
+    CMAQ_COL = COL
+    CMAQ_lon_res = (CMAQ_lonmax - CMAQ_lonmin) / (len_lon - 1.0)
+    CMAQ_lat_res = (CMAQ_latmax - WRF_latmin) / (len_lat - 1.0)
     if save2npy: np.save(out_dir + f'LONG_cmaq.npy'.replace(':', "-"), lon_c.filled(fill_value=0))
     if save2npy: np.save(out_dir + f'LAT_cmaq.npy'.replace(':', "-"), lat_c.filled(fill_value=0))
     if save2npy: np.save(out_dir + f'LONG_wrf.npy'.replace(':', "-"), lon.filled(fill_value=0))
@@ -188,38 +244,45 @@ def WRFCMAQ_var2pic(
                 # 输入对应indirect的变量的计算方法，通过确定的input变量来计算,如RH，ISAM总浓度等
                 # =====================😼😼😼😼😼😼😼😼😼########😼😼😼😼😼😼😼😼😼😼😼😼😼=====================
 
-                if var == 'RH':
-                    vardata = 0.236 * input_vars_get['PSFC'] * input_vars_get['Q2'] * np.exp(
-                        (17.67 * (input_vars_get['T2'] - 273.15)) / (input_vars_get['T2'] - 29.65)) ** (-1)
-                    output_vars.update({var: vardata})
-                    if ifpicdif == True:
-                        vardata2 = 0.236 * input_vars_get2['PSFC'] * input_vars_get2['Q2'] * np.exp(
-                            (17.67 * (input_vars_get2['T2'] - 273.15)) / (input_vars_get2['T2'] - 29.65)) ** (-1)
-                        output_vars2.update({var: vardata2})
-                if var == 'T2_C':
-                    vardata = input_vars_get['T2'] - 273.15
-                    output_vars.update({var: vardata})
-                    if ifpicdif == True:
-                        vardata2 = input_vars_get2['T2'] - 273.15
-                        output_vars2.update({var: vardata2})
-                if var == 'TSK_C':
-                    vardata = input_vars_get['TSK'] - 273.15
-                    output_vars.update({var: vardata})
-                    if ifpicdif == True:
-                        vardata2 = input_vars_get2['TSK'] - 273.15
-                        output_vars2.update({var: vardata2})
-                if var == 'WS':
-                    vardata = np.sqrt(input_vars_get['V10'] ** 2 + input_vars_get['U10'] ** 2)  # 分速度求和速度
-                    output_vars.update({var: vardata})
-                    if ifpicdif == True:
-                        vardata2 = np.sqrt(input_vars_get2['V10'] ** 2 + input_vars_get2['U10'] ** 2)  # 分速度求和速度
-                        output_vars2.update({var: vardata2})
-                if var == 'VC':
-                    vardata = np.sqrt(input_vars_get['V10'] ** 2 + input_vars_get['U10'] ** 2) * input_vars_get['PBLH']
-                    output_vars.update({var: vardata})
-                    if ifpicdif == True:
-                        vardata2 = np.sqrt(input_vars_get2['V10'] ** 2 + input_vars_get2['U10'] ** 2)  * input_vars_get2['PBLH']
-                        output_vars2.update({var: vardata2})
+
+                # if var == 'RH':
+                #     vardata = 0.236 * input_vars_get['PSFC'] * input_vars_get['Q2'] * np.exp((17.67 * (input_vars_get['T2'] - 273.15)) / (input_vars_get['T2'] - 29.65)) ** (-1)
+                #     output_vars.update({var: vardata})
+                #     if ifpicdif == True:
+                #         vardata2 = 0.236 * input_vars_get2['PSFC'] * input_vars_get2['Q2'] * np.exp(
+                #             (17.67 * (input_vars_get2['T2'] - 273.15)) / (input_vars_get2['T2'] - 29.65)) ** (-1)
+                #         output_vars2.update({var: vardata2})
+                # if var == 'T2_C':
+                #     vardata = input_vars_get['T2'] - 273.15
+                #     output_vars.update({var: vardata})
+                #     if ifpicdif == True:
+                #         vardata2 = input_vars_get2['T2'] - 273.15
+                #         output_vars2.update({var: vardata2})
+                # if var == 'TSK_C':
+                #     vardata = input_vars_get['TSK'] - 273.15
+                #     output_vars.update({var: vardata})
+                #     if ifpicdif == True:
+                #         vardata2 = input_vars_get2['TSK'] - 273.15
+                #         output_vars2.update({var: vardata2})
+                # if var == 'WS':
+                #     vardata = np.sqrt(input_vars_get['V10'] ** 2 + input_vars_get['U10'] ** 2)  # 分速度求和速度
+                #     output_vars.update({var: vardata})
+                #     if ifpicdif == True:
+                #         vardata2 = np.sqrt(input_vars_get2['V10'] ** 2 + input_vars_get2['U10'] ** 2)  # 分速度求和速度
+                #         output_vars2.update({var: vardata2})
+                # if var == 'VC':
+                #     vardata = np.sqrt(input_vars_get['V10'] ** 2 + input_vars_get['U10'] ** 2) * input_vars_get['PBLH']
+                #     output_vars.update({var: vardata})
+                #     if ifpicdif == True:
+                #         vardata2 = np.sqrt(input_vars_get2['V10'] ** 2 + input_vars_get2['U10'] ** 2)  * input_vars_get2['PBLH']
+                #         output_vars2.update({var: vardata2})
+
+
+                vardata = translate_expression_and_evaluate(indirect_vars_fomular[var],input_vars_get,np)
+                output_vars.update({var: vardata})
+                if ifpicdif == True:
+                    vardata2 = translate_expression_and_evaluate_2(indirect_vars_fomular[var],input_vars_get2,np)
+                    output_vars2.update({var: vardata2})
 
 
 
@@ -272,7 +335,7 @@ def WRFCMAQ_var2pic(
                     ax.add_feature(shp_c, lw=0.6, zorder=2)
                 position = fig.add_axes(cbar_positions[1])  # colorbar位置
                 if result_pic_type == 'contourf':
-                    if hourlydata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
+                    if hourlydata.shape != lon.shape: # 因为前面让所有输出的latlon都以WRF为基准，且CMAQ的数据行列相当于WRF少2个行列，则要对用于绘图的latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
                         lat_c = lat[0:lat.shape[0] - 2, 0:lat.shape[1] - 2]
                         data_pic = ax.contourf(lon_c, lat_c, hourlydata, cmap=target_vars_cmap_[index],
@@ -280,11 +343,13 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'CMAQ'
                     else:
                         data_pic = ax.contourf(lon, lat, hourlydata, cmap=target_vars_cmap_[index],levels=np.linspace(cbarmin, cbarmax, 80))
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'WRF'
                 if result_pic_type == 'pcolormesh':
                     if hourlydata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
@@ -293,11 +358,13 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'CMAQ'
                     else:
                         data_pic = ax.pcolormesh(lon, lat, hourlydata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'WRF'
                 if manmual_extent != []:ax.set_extent(manmual_extent)  # 显示范围 当需要强制控制时修改
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
@@ -322,6 +389,13 @@ def WRFCMAQ_var2pic(
                 plt.savefig(hourly_var_out_dir+f'{var} {str(date_now)}'.replace(':',"-"))
                 plt.close()
                 if save2npy: np.save(hourly_var_out_dir + f'{var} {str(date_now)}.npy'.replace(':', "-"), hourlydata)
+                if save2tiff:
+                    if tifftypeflag == 'WRF': # WRF和CMAQ的tiff输出格式参数不一样
+                        save_2tiff(hourly_var_out_dir + f'{var} {str(date_now)}.tiff'.replace(':', "-"),np.flipud(hourlydata),WRF_ROW,WRF_COL,
+                                   WRF_lonmin,WRF_lon_res,WRF_latmax,WRF_lat_res)
+                    if tifftypeflag == 'CMAQ':
+                        save_2tiff(hourly_var_out_dir + f'{var} {str(date_now)}.tiff'.replace(':', "-"),np.flipud(hourlydata),CMAQ_ROW,CMAQ_COL,
+                                   CMAQ_lonmin,CMAQ_lon_res,CMAQ_latmax,CMAQ_lat_res)
 
     if 'daily' in result_data_types:
         start_date_o = datetime.strptime(start_date, '%Y-%m-%d')
@@ -369,11 +443,13 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'CMAQ'
                     else:
                         data_pic = ax.contourf(lon, lat, dailydata, cmap=target_vars_cmap_[index],levels=np.linspace(cbarmin, cbarmax, 80))
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'WRF'
                 if result_pic_type == 'pcolormesh':
                     if dailydata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
@@ -382,11 +458,13 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'CMAQ'
                     else:
                         data_pic = ax.pcolormesh(lon, lat, dailydata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'WRF'
                 if manmual_extent != []: ax.set_extent(manmual_extent)  # 显示范围 当需要强制控制时修改
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
@@ -416,6 +494,13 @@ def WRFCMAQ_var2pic(
                 plt.savefig(daily_var_out_dir+f'{var} {str(date_now)}'.replace(':',"-"))
                 plt.close()
                 if save2npy: np.save(daily_var_out_dir + f'{var} {str(date_now)}.npy'.replace(':', "-"), dailydata)
+                if save2tiff:
+                    if tifftypeflag == 'WRF': # WRF和CMAQ的tiff输出格式参数不一样
+                        save_2tiff(daily_var_out_dir + f'{var} {str(date_now)}.tiff'.replace(':', "-"),np.flipud(dailydata),WRF_ROW,WRF_COL,
+                                   WRF_lonmin,WRF_lon_res,WRF_latmax,WRF_lat_res)
+                    if tifftypeflag == 'CMAQ':
+                        save_2tiff(daily_var_out_dir + f'{var} {str(date_now)}.tiff'.replace(':', "-"),np.flipud(dailydata),CMAQ_ROW,CMAQ_COL,
+                                   CMAQ_lonmin,CMAQ_lon_res,CMAQ_latmax,CMAQ_lat_res)
 
     if 'allmean' in result_data_types:
         start_date_o = datetime.strptime(start_date, '%Y-%m-%d')
@@ -464,11 +549,13 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'CMAQ'
                     else:
                         data_pic = ax.contourf(lon, lat, allmeandata, cmap=target_vars_cmap_[index],levels=np.linspace(cbarmin, cbarmax, 80))
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'WRF'
                 if result_pic_type == 'pcolormesh':
                     if allmeandata.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
@@ -477,11 +564,13 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'CMAQ'
                     else:
                         data_pic = ax.pcolormesh(lon, lat, allmeandata, cmap=target_vars_cmap_[index],vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'WRF'
                 if manmual_extent != []: ax.set_extent(manmual_extent)  # 显示范围 当需要强制控制时修改
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
@@ -510,9 +599,13 @@ def WRFCMAQ_var2pic(
                 plt.savefig(allmean_var_out_dir+f'{var} allmean'.replace(':',"-"))
                 plt.close()
                 if save2npy: np.save(allmean_var_out_dir + f'{var} allmean.npy'.replace(':', "-"), allmeandata)
-
-    if return2array == True:
-        return [hourly_datas,daily_datas,allmean_datas]
+                if save2tiff:
+                    if tifftypeflag == 'WRF': # WRF和CMAQ的tiff输出格式参数不一样
+                        save_2tiff(allmean_var_out_dir + f'{var} allmean.tiff'.replace(':', "-"),np.flipud(allmeandata),WRF_ROW,WRF_COL,
+                                   WRF_lonmin,WRF_lon_res,WRF_latmax,WRF_lat_res)
+                    if tifftypeflag == 'CMAQ':
+                        save_2tiff(allmean_var_out_dir + f'{var} allmean.tiff'.replace(':', "-"),np.flipud(allmeandata),CMAQ_ROW,CMAQ_COL,
+                                   CMAQ_lonmin,CMAQ_lon_res,CMAQ_latmax,CMAQ_lat_res)
 
     if ifpicdif == True:
         for day in tqdm(range(0,1),desc="输出模拟时段总平均值 2次模拟差值："):
@@ -576,11 +669,13 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'CMAQ'
                     else:
                         data_pic = ax.contourf(lon, lat, allmeandatadif, cmap='bwr',levels=np.linspace(cbarmin, cbarmax, 80))
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'WRF'
                 if result_pic_type == 'pcolormesh':
                     if allmeandatadif.shape != lon.shape: # CMAQ的数据行列相当于WRF少2个行列，要对latlon进行裁剪
                         lon_c = lon[0:lon.shape[0]-2,0:lon.shape[1]-2]
@@ -589,11 +684,13 @@ def WRFCMAQ_var2pic(
                         LAT_vert = getArrayVertices(lat_c)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon_c)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'CMAQ'
                     else:
                         data_pic = ax.pcolormesh(lon, lat, allmeandatadif, cmap='bwr',vmin=cbarmin,vmax=cbarmax)
                         LAT_vert = getArrayVertices(lat)  # 获取经纬度数组的四个顶点数据列表
                         LON_vert = getArrayVertices(lon)
                         ax.set_extent([LON_vert[0], LON_vert[1], LAT_vert[0], LAT_vert[2]])  # 显示范围
+                        tifftypeflag = 'WRF'
                 if manmual_extent != []: ax.set_extent(manmual_extent)  # 显示范围 当需要强制控制时修改
                 cb_ticks = np.linspace(cbarmin, cbarmax, 7)
                 cb = fig.colorbar(data_pic, cax=position, orientation=cbar_positions[0], extend='both',ticks=cb_ticks, format=target_vars_cbarticksFormat[index], fraction=0.2)
@@ -613,6 +710,13 @@ def WRFCMAQ_var2pic(
                 plt.savefig(allmean_var_out_dir+f'{var} allmeandif'.replace(':',"-"))
                 plt.close()
                 if save2npy: np.save(allmean_var_out_dir+f'{var} allmeandif.npy'.replace(':', "-"), allmeandatadif)
+                if save2tiff:
+                    if tifftypeflag == 'WRF': # WRF和CMAQ的tiff输出格式参数不一样
+                        save_2tiff(allmean_var_out_dir+f'{var} allmeandif.tiff'.replace(':', "-"),np.flipud(allmeandatadif),WRF_ROW,WRF_COL,
+                                   WRF_lonmin,WRF_lon_res,WRF_latmax,WRF_lat_res)
+                    if tifftypeflag == 'CMAQ':
+                        save_2tiff(allmean_var_out_dir+f'{var} allmeandif.tiff'.replace(':', "-"),np.flipud(allmeandatadif),CMAQ_ROW,CMAQ_COL,
+                                   CMAQ_lonmin,CMAQ_lon_res,CMAQ_latmax,CMAQ_lat_res)
 
 
 
