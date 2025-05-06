@@ -296,7 +296,7 @@ def WRFCMAQ_var2pic(
     # 绘制图片基本框架
     matplotlib.rcParams['font.sans-serif'] = ['SimHei']  # 使用黑体
     matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
-    font_path = r"D:\Fonts\times+simsun.ttf"
+    font_path = r"F:\wrfdata\times+simsun.ttf"
     font_manager.fontManager.addfont(font_path)
     prop = font_manager.FontProperties(fname=font_path)
     matplotlib.rcParams['font.family'] = 'sans-serif'  # 使用字体中的无衬线体

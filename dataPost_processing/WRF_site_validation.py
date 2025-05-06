@@ -370,7 +370,6 @@ def WRF_site_validation(
     metstation_infofile_dir = "",
     result_pic_types=[],
     out_dir="",  #
-    result_csv_name="",  #
     suffix="",
 ):
     """
@@ -384,7 +383,6 @@ def WRF_site_validation(
     :param metstation_infofile_dir: 全国isd气象站点位置信息csv文件所在目录
     :param result_pic_types: 输出哪些类型的结果图，'line'：双折线图，'scatter':散点回归线图
     :param out_dir: 验证结果输出的文件夹
-    :param result_csv_name: 包含验证参数计算结果的输出csv文件名称
     :param suffix: 验证过程后缀，用于区分
     """
     deg = 180.0 / np.pi
@@ -592,13 +590,14 @@ def WRF_site_validation(
             para_data_target.at[csv_row, '站点纬度'] = station_lat
             csv_row += 1
 
-    with pd.ExcelWriter(f'{out_dir}{result_csv_name}_{suffix}.xlsx', engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(f'{out_dir}{"validationPara"}_{suffix}.xlsx', engine='xlsxwriter') as writer:
         para_data_T2.to_excel(writer, sheet_name='T2', index=False)  # 将 df1 写入 Sheet1
         para_data_RH.to_excel(writer, sheet_name='RH', index=False)
         para_data_WS.to_excel(writer, sheet_name='WS', index=False)
         para_data_WD.to_excel(writer, sheet_name='WD', index=False)
 
 if __name__ == '__main__':
+
     WRF_site_validation(
         start_date='2022-08-01',
         daycount=31,
@@ -608,7 +607,6 @@ if __name__ == '__main__':
         metstation_infofile_dir="E:\气象站数据\全国气象站位置信息\站点列表_原始数据.csv",
         result_pic_types=['line', 'scatter'],
         out_dir=r'E:\Emission_update\\test_wrf_validation\\',
-        result_csv_name='validationPara',
         suffix='CD202208'
     )
     pass

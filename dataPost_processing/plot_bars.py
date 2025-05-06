@@ -22,7 +22,8 @@ def plot_bars(
     x_y_labels = [],
     y_max_min=[],  #
     y_size=5,  #
-    y_ticks_decimal=2,
+    y_ticks_decimal=0,
+    x_ticks_decimal=0,
     fontsize = 13,
     legendsize = None,
     sticksize = None,
@@ -63,7 +64,13 @@ def plot_bars(
         if y_ticks_decimal == 100:
             return f'{y*100}%'  # 特殊情形 显示为百分率
         else:
-            return f'{y:.{y_ticks_decimal}f}'  # 保留两位小数
+            return f'{y:.{y_ticks_decimal}f}'  # 保留x位小数
+
+    def format_x_ticks(x,pos):
+        if x_ticks_decimal == 100:
+            return f'{x*100}%'  # 特殊情形 显示为百分率
+        else:
+            return f'{x:.{x_ticks_decimal}f}'  # 保留x位小数
 
     def generate_random_color_codes(n):
         color_codes = []
@@ -94,6 +101,8 @@ def plot_bars(
     if y_max_min == []: max_calcu_flag = True
     if ifstackbars == False: # 不堆叠
         bar = ax.bar(xticks_name, bardatas, color=generate_random_color_codes(1),width = bar_width,label=bar_labels[0])
+        if max_calcu_flag == True:  # 不设立时自动计算
+            y_max_min = [np.max(bardatas), 0]
     else:
         barcolors = generate_random_color_codes(len(bardatas))
         for bardata in bardatas:
@@ -127,11 +136,12 @@ def plot_bars(
     plt.ylim(0, max_value)  # y轴 高度范围
     plt.yticks(y_)
     plt.gca().yaxis.set_major_formatter(FuncFormatter(format_y_ticks))
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(format_x_ticks))
     yticks = plt.yticks()[0]
     # 为每个y轴刻度画虚线
     for ytick in yticks:
         plt.axhline(y=ytick, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-    plt.xticks(fontsize=fontsize)  # xticks必须在这个位置才生效
+    plt.xticks(xlabels[::3],fontsize=fontsize)  # xticks必须在这个位置才生效
     plt.yticks(fontsize=fontsize)
     plt.savefig(outputdir + f"{filename}.png")
 
