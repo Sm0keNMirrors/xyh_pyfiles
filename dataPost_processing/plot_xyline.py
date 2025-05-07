@@ -64,21 +64,22 @@ def plot_xyline(
         return f'{y:.{y_ticks_decimal}f}'  # 保留两位小数
     # 字体设置
     if font_dir != "":
-        # font_dir = r"D:\Fonts\times+simsun.ttf"
+        font_dir = r"D:\Fonts\times+simsun.ttf"
         font_manager.fontManager.addfont(font_dir)
         prop = font_manager.FontProperties(fname=font_dir)
         rcParams['font.sans-serif'] = prop.get_name()  # 根据名称设置字体
-        rcParams['font.family'] = 'SimHei' # 默认中文正常
-        rcParams['axes.unicode_minus'] = False
     else:
         prop = None
-    rcParams['font.family'] = 'sans-serif'  # 使用字体中的无衬线体
+        rcParams['font.family'] = 'SimHei' # 中文字体
+        # rcParams['font.family'] = 'sans-serif'  # 使用字体中的无衬线体
     rcParams['font.size'] = fontsize  # 设置字体大小
     rcParams['axes.unicode_minus'] = False  # 使坐标轴刻度标签正常显示正负号
 
     if y_max_min == []:
         if len(ydata) == 1:
-            y_max_min = [np.nanmax(ydata[0]),np.nanmin(ydata[0])]
+            ydata_ok1 = np.array(ydata[0])
+            ydata_ok2 = ydata_ok1[~np.isnan(ydata_ok1) & ~np.isinf(ydata_ok1)]
+            y_max_min = [np.nanmax(ydata_ok2),np.nanmin(ydata_ok2)]
 
     max_value = y_max_min[0]
     min_value = y_max_min[1]
