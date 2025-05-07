@@ -86,6 +86,8 @@ def plot_bars(
         font_manager.fontManager.addfont(font_dir)
         prop = font_manager.FontProperties(fname=font_dir)
         rcParams['font.sans-serif'] = prop.get_name()  # 根据名称设置字体
+        rcParams['font.family'] = 'SimHei' # 默认中文正常
+        rcParams['axes.unicode_minus'] = False
     else:
         prop = None
     rcParams['font.family'] = 'sans-serif'  # 使用字体中的无衬线体
