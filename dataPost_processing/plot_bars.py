@@ -42,7 +42,7 @@ def plot_bars(
     :param bar_width: 柱宽度
 
     :param fig_size: 图像大小，matplotlib
-    :param figaxe:  图像轴绘制范围
+    :param figaxe:  图像轴绘制范围,[left, bottom, width, height]
     :param x_y_labels: 图像绘制的xy名称
     :param y_max_min: Y轴的最大最小值，用于设置y轴限度
     :param y_size: 以Y轴范围划分为多少个提示虚线，默认5

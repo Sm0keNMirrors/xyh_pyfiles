@@ -46,7 +46,7 @@ def plot_xyline(
     :param y_size: 以Y轴范围划分为多少个提示虚线，默认5
     :param y_ticks_decimal: # 保留多少y刻度的小数位数，在数值很小时，刻度划分可能会因保留位数而不均匀
     :param fig_size: 图像大小，matplotlib
-    :param figaxe:  图像轴绘制范围
+    :param figaxe:  图像轴绘制范围,[left, bottom, width, height]
     :param x_y_labels: 图像绘制的xy名称
     :param title: 图像标题
     :param fontsize: 字体大小
