@@ -1,3 +1,4 @@
+import os
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,6 +14,9 @@ def plot_boxes(
 
     x_y_labels = [],
     box_props = dict(facecolor='lightblue', color='blue'),
+    marker_props = dict(marker='.', color='grey', markersize=1),
+    IQR = 1.5,
+    widths=0.5,
 
     fig_size = (5, 2),
     figaxe = [0.12, 0.2, 0.7, 0.7],
@@ -29,6 +33,7 @@ def plot_boxes(
 ):
     """
 
+    :param IQR: 四分位数间距，用于判断异常值点，一般都为1.5，若异常值点多可以调整更高
     :param if_lineboxex: 是否改为绘制由平均值线条，和25 75分位值作为上下限fill的图像，
     :param box_props:
     :param fontsize:
@@ -53,6 +58,8 @@ def plot_boxes(
     rcParams['font.size'] = fontsize  # 设置字体大小
     rcParams['axes.unicode_minus'] = False  # 使坐标轴刻度标签正常显示正负号
 
+    os.makedirs(outputdir, exist_ok=True)
+
     fig = plt.figure(figsize=fig_size, dpi=200)  # (8, 3)
     ax = fig.add_axes(figaxe)  # [0.15, 0.2, 0.73, 0.7]
 
@@ -63,6 +70,9 @@ def plot_boxes(
             patch_artist=True,
             labels=boxes_labels,
             boxprops = box_props,
+            whis=IQR,
+            flierprops=marker_props,
+            widths=widths,
         )
     else:
         mean_values = np.nanmean(boxes_datas, axis=1) # 均值
