@@ -30,8 +30,11 @@ def plot_boxes(
     xdata_dateformat = '', #
     xdata_numberformat = 0, #
     xdata_customticks = [],
+
+    if_return_plot = False,
 ):
     """
+
 
     :param IQR: 四分位数间距，用于判断异常值点，一般都为1.5，若异常值点多可以调整更高
     :param if_lineboxex: 是否改为绘制由平均值线条，和25 75分位值作为上下限fill的图像，
@@ -42,6 +45,7 @@ def plot_boxes(
     :param fig_size:
     :param figaxe:
     :param boxes_labels: 每个箱线图的横坐标表示
+    :param if_return_plot: 是否在程序中返回plot，而不是直接完成绘图，通过此可以在代码中进一步进行绘图，但要自己手动再保存
     :return:
     """
 
@@ -92,4 +96,7 @@ def plot_boxes(
 
     # 显示图形
     plt.grid(axis='y')  # 添加网格
-    plt.savefig(outputdir + f"{filename}.png")
+    if if_return_plot == False:
+        plt.savefig(outputdir + f"{filename}.png")
+    else:
+        return plt,ax,fig

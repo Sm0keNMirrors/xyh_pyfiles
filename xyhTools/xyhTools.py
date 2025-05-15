@@ -29,6 +29,25 @@ def generate_dates(year):
 
     return date_list
 
+
+def calculate_average_wind_direction(wind_directions):
+    """
+    计算平均风向
+
+    :param wind_speeds: 风速列表
+    :param wind_directions: 风向列表（单位：度）
+    :return: 平均风向（单位：度）
+    """
+    WD = wind_directions * np.pi / 180
+    cosValue = np.nanmean(np.cos(WD))
+    sinValue = np.nanmean(np.sin(WD))
+    getWD = (np.arctan2(sinValue, cosValue) / np.pi * 180)
+    if getWD < 0:
+        FinalWD = getWD + 360
+    else:
+        FinalWD = getWD
+    return FinalWD
+
 def metstationFilesTo2CSV(file, outfile, year):
     """
     将气象站点数据转换为excel,同时补充缺失数据,成逐小时的数据格式,缺失值用-9999替换
@@ -84,12 +103,33 @@ def metstationFilesTo2CSV(file, outfile, year):
                 result_csv_data.at[target_row, '液体沉淀深度尺寸-1小时'] = float(m[10])
                 result_csv_data.at[target_row, '液体沉淀深度尺寸-6小时'] = float(m[11])
                 flag = 1
-        if flag == 0:  # 没有找到数据，输入-9999
+        if flag == 0:  # 没有找到数据，输入np.nan 以前为-9999
             for s in range(4, 12):
                 result_csv_data.loc[target_row, ['温度', '露点温度', '海洋压强', '风向', '风速', '云量',
-              '液体沉淀深度尺寸-1小时', '液体沉淀深度尺寸-6小时']] = -9999
+              '液体沉淀深度尺寸-1小时', '液体沉淀深度尺寸-6小时']] = np.nan
 
+    # 添加一个合并的datetime格式的列
+    date_strings = result_csv_data[['年份', '月', '日', '时']].astype(int).astype(str).agg('-'.join, axis=1)
+    result_csv_data['datetime'] = pd.to_datetime(date_strings, format='%Y-%m-%d-%H')
     result_csv_data.to_csv(outfile,encoding='utf-8')
+
+def metstationDataGetfromCSV(csvfile, daterange,metdata):
+    """
+    从isd气象站数据的csvfile来获取某个daterange下的气象站数据类型metdata
+    :param csvfile:
+    :param daterange:
+    :param metdata:
+    :return:
+    """
+    metdata_dataframe = pd.read_csv(csvfile)
+    # 读取后的datetime因为被保存成为了str，需要在这里再转一下
+    metdata_dataframe['datetime'] = pd.to_datetime(
+        metdata_dataframe.apply(lambda row: f"{int(row['年份'])}-{int(row['月'])}-{int(row['日'])} {int(row['时'])}:00",
+                              axis=1)
+    )
+    rows_in_range = metdata_dataframe[
+        (metdata_dataframe['datetime'] >= daterange[0]) & (metdata_dataframe['datetime'] <= daterange[-1])].index.tolist()
+    return metdata_dataframe.loc[rows_in_range, metdata].tolist()
 
 def isdsite_metdata_select(
     latmin, latmax, lonmin, lonmax,
