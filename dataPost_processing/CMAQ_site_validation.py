@@ -6,6 +6,8 @@ Last update:
 
 import datetime
 import os
+import sys
+import pypinyin
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -286,6 +288,13 @@ def getAirStationsFromLatLon(uplat, downlat, leftlon, rightlon, station_info_csv
                                         # 数据格式：站点名：经度 纬度 站点代号 所在城市
     return airStations
 
+def calculate_figRowCol_size(x):
+    import math
+    # 对 x 进行开方，找到一个接近的行数
+    n = int(math.ceil(math.sqrt(x)))  # 行数
+    m = int(math.ceil(x / n))          # 列数
+    return n, m
+
 def CMAQ_site_validation(
     start_date='YYYY-MM-DD',
     daycount=5, #
@@ -297,7 +306,9 @@ def CMAQ_site_validation(
     Molar_mass = 0, #
     airstation_files_dir = "",
     airstation_infofile_dir = "",
+    airstation_selected = [],
     result_pic_types=[],
+    result_pic_combine = [],
     out_dir = "", #
     result_csv_name = "", #
     suffix = "",
@@ -315,7 +326,9 @@ def CMAQ_site_validation(
     :param Molar_mass: ppm为单位的物质的摩尔质量，为0时则不进行转换，如PM2.5，直接为ug
     :param airstation_files_dir: 包含观测站数据的csv文件所在文件夹
     :param airstation_infofile_dir: 包含观测站信息的csv文件路径
+    :param airstation_selected: 选择性得仅输出名字为这些站点的验证结果，当[]时或不指定则输出范围内的全部站点
     :param result_pic_types: 输出哪些类型的结果图，'line'：双折线图，'scatter':散点回归线图
+    :param result_pic_combine: 是否将结果图画为一个总图，对应上面的'line'，'scatter'
     :param out_dir: 验证结果输出的文件夹
     :param result_csv_name: 包含验证参数计算结果的输出csv文件名称
     :param suffix: 验证过程后缀，用于区分
@@ -335,7 +348,16 @@ def CMAQ_site_validation(
     var_lat = np.array(GRIDCRO2D.variables['LAT'][:][0])
     lonmin, latmax, lonmax, latmin = (var_lon.min(), var_lat.max(),
                                       var_lon.max(), var_lat.min())
-    airStation_locations = getAirStationsFromLatLon(latmax, latmin, lonmin, lonmax,airstation_infofile_dir)  # 获得模拟区域内的所有站点信息
+    airStation_locations_ = getAirStationsFromLatLon(latmax, latmin, lonmin, lonmax,airstation_infofile_dir)  # 获得模拟区域内的所有站点信息
+    airStation_locations = {}
+    if airstation_selected != []:
+        for x in airStation_locations_:
+            if x in airstation_selected:
+                airStation_locations.update({x:airStation_locations_[x]})
+    else:
+        airStation_locations = airStation_locations_
+    print(airStation_locations)
+
 
     labels = ['站点', 'MAE', 'R', 'IOA', 'NMB', 'NME','MFE', 'MFB','FE', 'FB', '站点经度', '站点纬度', '城市']
     result_csv_data = pd.DataFrame(columns=labels) # 创建记录结果的csv
@@ -348,10 +370,16 @@ def CMAQ_site_validation(
         airStation_csv_list.append(f"{airstation_files_dir}china_sites_{filedate}.csv")
 
 
+    if result_pic_combine != []:
+        if 'scatter' in result_pic_combine:
+            nn,mm = calculate_figRowCol_size(len(list(airStation_locations.keys())))
+            fig_c, axs_c = plt.subplots(nn, mm, figsize=(18, 18), dpi=300,)  # 创建 子图布局
     csv_row = 1 # csv非表头的第1行开始写入
+    plotcount = 0 # 绘制子图的计数
     for airstation in tqdm(airStation_locations.values(),desc='处理所有有效站点...'): # 从站点列表处理每一个站点
         stname = list(airStation_locations.keys())[list(airStation_locations.values()).index(airstation)]  # 通过值k获取字典dic对应键的公式： list(dic.keys())[list(dic.values()).index(k)]
         # 读取经纬度与网格关系数据
+        stcity = airStation_locations[stname][3]
         CMAQXLAT = np.array(GRIDCRO2D.variables['LAT'][:][0])
         CMAQXLONG = np.array(GRIDCRO2D.variables['LON'][:][0])
         nearpos = getNearestPos(airstation[1], airstation[0], CMAQXLAT, CMAQXLONG)  # 从WRF得到站点格子
@@ -411,8 +439,8 @@ def CMAQ_site_validation(
             ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))  # 设置不显示年份
             plt.legend((line1, line2), ('Obs', 'Sim'), loc='upper right', frameon=False, framealpha=0.5,
                        fontsize=5)
-            plt.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png')
-            plt.close()
+            fig2.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png')
+            fig2.close()
         if 'scatter' in result_pic_types:
             if os.path.exists(f'{out_dir}pics_scatter\\') is False: os.mkdir(f'{out_dir}pics_scatter\\')
             plt.figure(figsize=(6, 6) ,dpi=200)
@@ -445,6 +473,17 @@ def CMAQ_site_validation(
 
             plt.savefig(f'{out_dir}pics_scatter\\{stname}_{suffix}.png')
             plt.close()
+            if 'scatter' in result_pic_combine:
+                row = plotcount // mm  # 绘图行列
+                col = plotcount % mm  # 绘图行列
+                axs_c[row, col].scatter(observed_clean, simulated_clean,s=10, c=z, cmap='viridis', alpha=0.6)
+                axs_c[row, col].plot(x_fit, y_fit, color='red', linewidth=2, label=equation)
+                stcity_eng = ''.join(pypinyin.lazy_pinyin(stcity))
+                axs_c[row, col].text(0.01, 0.99, stcity_eng, transform=axs_c[row, col].transAxes,
+                      fontsize=18, verticalalignment='top', horizontalalignment='left')
+                axs_c[row, col].legend(loc='lower right')
+                axs_c[row, col].set_xlim(0,250)
+                axs_c[row, col].set_ylim(0, 250)
         """
         计算精度系数
         """
@@ -471,10 +510,16 @@ def CMAQ_site_validation(
         result_csv_data.at[csv_row, '站点纬度'] = airstation[0]
         result_csv_data.at[csv_row, '城市'] = airstation[3]
         csv_row += 1
-
+        plotcount+=1
 
     result_csv_data.to_csv(f'{out_dir}{result_csv_name}_{suffix}.csv',encoding='utf-8')
-
+    # 总体绘图的一些设置
+    fig_c.delaxes(axs_c[nn-1, mm-1])  # 删除一些子图
+    fig_c.delaxes(axs_c[nn-1, mm-2])
+    plt.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.08)
+    fig_c.supxlabel('Observed O$_{3}$ (μg/m$^{3}$)', fontsize=25)
+    fig_c.supylabel('Simulated O$_{3}$ (μg/m$^{3}$)', fontsize=25)
+    fig_c.savefig(f'{out_dir}\\scatter_combine_{suffix}.png')
 
 if __name__ == '__main__':
     # CMAQ_site_validation(

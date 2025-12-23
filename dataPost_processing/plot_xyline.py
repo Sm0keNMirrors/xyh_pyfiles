@@ -80,7 +80,8 @@ def plot_xyline(
             ydata_ok1 = np.array(ydata[0])
             ydata_ok2 = ydata_ok1[~np.isnan(ydata_ok1) & ~np.isinf(ydata_ok1)]
             y_max_min = [np.nanmax(ydata_ok2),np.nanmin(ydata_ok2)]
-
+        else:
+            y_max_min = [np.nanmax(ydata),np.nanmin(ydata)]
     max_value = y_max_min[0]
     min_value = y_max_min[1]
     size = y_size

@@ -63,6 +63,8 @@ def CMAQ_CombineWithISAM(
     GRIDNAME = "",# GRIDDESC中的gridname
     CMAQISAM_version = "", #版本不同决定了PM2.5的合并机制，有"v54" "v53"两种
     combined_tagged_subs = [], # 被标记的需要combine的物质的变量名称,'O3','PM25'等，其中PM25输入后会根据标记物质计算，而其他则直接由其变量名_tag合并 不需要计算
+    if_combinePA = False, # combine的目标是否是过程分析模拟结果PA文件
+    if_combine_special = [False,''], # 是否combine其他类型 如WDEP
     cores = 12,# 多线程运行核心数
 ):
     # 5.3版本CMAQISAM合并PM2.5的物种，物种不完全，仅能标记部分
@@ -111,28 +113,68 @@ def CMAQ_CombineWithISAM(
     SA_CCTM_file_list = os.listdir(CCTM_dir)  # CCTM
     to_combine_files_list = []
     DIAG_files_list = []
-    for i in SA_CCTM_file_list:  # 找出对应文件列表
-        if i[-3:] == '.nc':
-            if i.split("_")[1] + i.split("_")[2] == combine_file_namestr:
-                to_combine_files_list.append(i)
-            if 'PM25' in combined_tagged_subs:
-                if i.split("_")[1] == PMDIAGfilename:
-                    DIAG_files_list.append(i)
-    Combinevars = []
-    ISAM_tags = []
-    CONCf_pre = nc.Dataset(CCTM_dir + to_combine_files_list[0])  # 先打开一个文件，获取数据信息
-    all_vars_pre = list(CONCf_pre.variables.keys())
-    for x in all_vars_pre: # 从所有变量中找到需要combine的PM组分
-        subname = x.split('_')[0] # 去掉ISAMtag
-        if subname in Combine_substance: # 需要combine的带tag变量
-            Combinevars.append(x)
-        if len(x.split('_')) == 2:
-            tag = x.split('_')[1]
-            if '_'+tag not in ISAM_tags:
-                ISAM_tags.append('_'+tag)
-    if 'PM25' in combined_tagged_subs:
-        for x in PM25_DIAGpara: # 把计算参数加上
-            Combinevars.append(x)
+    if if_combinePA == True: 
+        for i in SA_CCTM_file_list:  # 找出对应文件列表
+            if i[-3:] == '.nc':   # 当要conbi
+                if i.split("_")[1] + i.split("_")[2] == 'PA1':
+                    to_combine_files_list.append(i)
+                if i.split("_")[1] == 'WETDEP1':
+                    to_combine_files_list.append(i)
+    elif if_combine_special[0] == True:
+        for i in SA_CCTM_file_list:  # 找出对应文件列表
+            if i[-3:] == '.nc':
+                if i.split("_")[1] == if_combine_special[1]: # 指定的特别combine文件类型
+                    to_combine_files_list.append(i)
+                if 'PM25' in combined_tagged_subs:
+                    if i.split("_")[1] == PMDIAGfilename:
+                        DIAG_files_list.append(i)
+    else:
+        # 一般的正常ISAM combine
+        for i in SA_CCTM_file_list:  # 找出对应文件列表
+            if i[-3:] == '.nc':
+                if i.split("_")[1] + i.split("_")[2] == combine_file_namestr:
+                    to_combine_files_list.append(i)
+                if 'PM25' in combined_tagged_subs:
+                    if i.split("_")[1] == PMDIAGfilename:
+                        DIAG_files_list.append(i)
+                
+
+    if if_combinePA == True:
+        Combinevars = []
+        ISAM_tags = []
+        CONCf_pre = nc.Dataset(CCTM_dir + to_combine_files_list[0])  # 先打开一个文件，获取数据信息
+        all_vars_pre = list(CONCf_pre.variables.keys())
+        all_vars_pre.remove('TFLAG')
+        for x in all_vars_pre: # 从所有变量中找到需要combine的PM组分
+            subname = x.split('_')[1] # 去掉ISAMtag
+            if subname in Combine_substance: # 需要combine的带tag变量
+                Combinevars.append(x)
+            if len(x.split('_')) == 2:
+                tag = x.split('_')[1]
+                if tag+'_' not in ISAM_tags:
+                    ISAM_tags.append(tag+'_')
+        if 'PM25' in combined_tagged_subs:
+            for x in PM25_DIAGpara: # 把计算参数加上
+                Combinevars.append(x)
+    elif if_combine_special[0] == True:
+        Combinevars = combined_tagged_subs
+    else:
+        Combinevars = []
+        ISAM_tags = []
+        CONCf_pre = nc.Dataset(CCTM_dir + to_combine_files_list[0])  # 先打开一个文件，获取数据信息
+        all_vars_pre = list(CONCf_pre.variables.keys())
+        for x in all_vars_pre: # 从所有变量中找到需要combine的PM组分
+            subname = x.split('_')[0] # 去掉ISAMtag
+            if subname in Combine_substance: # 需要combine的带tag变量
+                Combinevars.append(x)
+            if len(x.split('_')) == 2:
+                tag = x.split('_')[1]
+                if '_'+tag not in ISAM_tags:
+                    ISAM_tags.append('_'+tag)
+        if 'PM25' in combined_tagged_subs:
+            for x in PM25_DIAGpara: # 把计算参数加上
+                Combinevars.append(x)
+        
             
     # 进行文件组各类物种时间序列合并的过程：
     all_vars_lists = {}
@@ -150,13 +192,13 @@ def CMAQ_CombineWithISAM(
                     break
                 CONCf_next = nc.Dataset(CCTM_dir + to_combine_files_list[n_next])
 
-                data_next = np.array(CONCf_next.variables[x][:])
+                data_next = np.array(CONCf_next.variables[x][:],dtype=np.float16)
                 if to_combine_files_list.index(i) == 0:
-                    data_now = np.array(CONCf.variables[x][:])  # 首次输入文件
-                    data_now = np.concatenate((data_now, data_next), axis=0)  # ACONC没有多的1h，不用删除处理
+                    data_now = np.array(CONCf.variables[x][:],dtype=np.float16)  # 首次输入文件
+                    data_now = np.concatenate((data_now, data_next), axis=0,dtype=np.float16)  # ACONC没有多的1h，不用删除处理
 
                 if to_combine_files_list.index(i) != 0:
-                    data_now = np.concatenate((data_now, data_next), axis=0)
+                    data_now = np.concatenate((data_now, data_next), axis=0,dtype=np.float16)
                 CONCf_next.close()
                 CONCf.close()
         if 'PM25' in combined_tagged_subs:
@@ -171,14 +213,14 @@ def CMAQ_CombineWithISAM(
                         break
                     CONCf_next = nc.Dataset(CCTM_dir + DIAG_files_list[n_next])
 
-                    data_next = np.array(CONCf_next.variables[x][:])
+                    data_next = np.array(CONCf_next.variables[x][:],dtype=np.float16)
 
                     if DIAG_files_list.index(i) == 0:
-                        data_now = np.array(CONCf.variables[x][:])  # 首次输入文件
-                        data_now = np.concatenate((data_now, data_next), axis=0)  # ACONC没有多的1h，不用删除处理
+                        data_now = np.array(CONCf.variables[x][:],dtype=np.float16)  # 首次输入文件
+                        data_now = np.concatenate((data_now, data_next), axis=0,dtype=np.float16)  # ACONC没有多的1h，不用删除处理
 
                     if DIAG_files_list.index(i) != 0:
-                        data_now = np.concatenate((data_now, data_next), axis=0)
+                        data_now = np.concatenate((data_now, data_next), axis=0,dtype=np.float16)
                     CONCf_next.close()
                     CONCf.close()
 
@@ -204,6 +246,8 @@ def CMAQ_CombineWithISAM(
     gf.updatetflag(overwrite=True)
     COMBINE_file = gf.sliceDimensions(TSTEP=[0] * 24 * daynum) # CMAQnc文件框架
     for i in tqdm(all_vars_lists,desc="导入combine后的nc文件..."):
+        if if_combinePA == True:
+            COMBINE_file.createDimension('LAY', 34)
         emission_specie_var = COMBINE_file.createVariable(i, "f", ("TSTEP", "LAY", "ROW", "COL"))
         if 'PM25' in combined_tagged_subs:
             if i in PM25_DIAGpara:
@@ -237,7 +281,7 @@ def CMAQ_CombineWithISAM(
                     AI_tag.append(subname + tag_now)
 
             data_shape = np.array(COMBINE_file.variables[Combinevars[0]][:]).shape  # 获得数据shape来存放all
-            PM25_data = np.zeros(data_shape, 'float64')  # PM25数组初始化
+            PM25_data = np.zeros(data_shape, 'float16')  # PM25数组初始化
             for t in tqdm(range(0, data_shape[0]),desc="PM25" + tag_now + "每小时浓度计算..."):  # 每个小时的数据相加
                 if CMAQISAM_version == "v53":
                     PM25_AT_data = np.array(COMBINE_file.variables['PM25AT'][:])
@@ -247,9 +291,9 @@ def CMAQ_CombineWithISAM(
                     PM25_AT_data = np.array(COMBINE_file.variables['FPM25AIT'][:])
                     PM25_AC_data = np.array(COMBINE_file.variables['FPM25ACC'][:])
                     PM25_CO_data = np.array(COMBINE_file.variables['FPM25COR'][:])
-                PM25_AI_data = np.zeros(data_shape, 'float64')
-                PM25_AJ_data = np.zeros(data_shape, 'float64')  # PM25数组初始化
-                PM25_AK_data = np.zeros(data_shape, 'float64')
+                PM25_AI_data = np.zeros(data_shape, 'float16')
+                PM25_AJ_data = np.zeros(data_shape, 'float16')  # PM25数组初始化
+                PM25_AK_data = np.zeros(data_shape, 'float16')
                 for i in all_vars_lists:
                     if i not in PM25_DIAGpara:
                         if i in AI_tag:

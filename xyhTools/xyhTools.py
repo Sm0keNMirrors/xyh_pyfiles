@@ -4,13 +4,16 @@ import matplotlib
 import netCDF4 as nc
 import os
 import numpy as np
+import rasterio
+from pyproj import Proj
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import datetime
 import pandas as pd
-from sklearn.linear_model import LinearRegression
+# from sklearn.linear_model import LinearRegression
 from scipy.stats import gaussian_kde
+import subprocess
 
 def generate_dates(year):
     # 创建一个空列表来存储结果
@@ -29,6 +32,210 @@ def generate_dates(year):
 
     return date_list
 
+def pickle_data(pkl_data,pkl_data_name,pkl_dir,type):
+    import pickle
+    """
+    将数据处理后的变量pickle为pkl文件，在绘图过程直接读取不需要再绘制
+    pkl_data: 保存的变量,w时有效
+    :param pkl_dir: pkl文件路径
+    :param type: r-读取pkl w-写pkl
+    :return: r时返回读取的变量
+    """
+    if type == 'w':
+        with open(f'{pkl_dir}{pkl_data_name}.pkl', 'wb') as pickle_file:
+            pickle.dump(pkl_data, pickle_file)
+    if type == 'r':
+        with open(f'{pkl_dir}{pkl_data_name}.pkl', 'rb') as pickle_file:
+            load_data = pickle.load(pickle_file)
+        return load_data
+    
+
+def jupyter_run_subprocess(cmd,cwd):
+    """
+    能在ipynb文件中执行cmd，并将输出打印在ipynb中的功能函数
+    :param cmd: 执行的指令
+    :param cwd: 执行的指令所在目录
+    """
+    p = subprocess.Popen(
+        cmd,
+        shell=True,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True
+    )
+    for line in p.stdout:      # 实时逐行打印
+        print(line, end='')
+    p.wait()
+    print("\n=== RETURN CODE ===", p.returncode)
+
+def tiff2array(file_path):
+    try:
+        with rasterio.open(file_path) as dataset:
+            # 读取所有波段的数据为 NumPy 数组
+            array = dataset.read()  # 读取所有波段，返回的形状为 (波段数, 高, 宽)
+        return array
+    except Exception as e:
+        print(f"读取 TIFF 文件时发生错误: {e}")
+        return None
+    
+import numpy as np
+import xarray as xr
+
+def save_3d_array2nc(
+    data,
+    out_path,
+    var_name="var",
+    time=None,
+    row_name="south_north",
+    col_name="west_east",
+):
+    """
+    将一个 shape=(time, row, col) 的 3D 数组简单保存为 NetCDF 文件.
+
+    参数
+    ----
+    data : np.ndarray
+        3D 数组，形状必须为 (time, row, col)
+    out_path : str
+        输出 nc 文件路径
+    var_name : str
+        变量名，例如 "PRECIP_HOURLY"
+    time : 1D array-like, optional
+        时间坐标，长度等于 time 维度长度。
+        - 若为 None，则用 0,1,2,... 作为时间索引
+        - 可以传 numpy datetime64, pandas.DatetimeIndex, 或普通数值
+    row_name : str
+        行维度名称，默认 "south_north"
+    col_name : str
+        列维度名称，默认 "west_east"
+    """
+
+    data = np.asarray(data)
+    if data.ndim != 3:
+        raise ValueError(f"data 必须是 3 维 (time,row,col)，当前维度为 {data.ndim}")
+
+    nt, ny, nx = data.shape
+
+    # 如果没给时间轴，就用简单的 0..nt-1
+    if time is None:
+        time = np.arange(nt)
+
+    if len(time) != nt:
+        raise ValueError(f"time 长度({len(time)}) 与 data 的 time 维({nt}) 不一致")
+
+    da = xr.DataArray(
+        data,
+        dims=("time", row_name, col_name),
+        coords={"time": time},
+        name=var_name,
+    )
+
+    ds = da.to_dataset()
+    ds.to_netcdf(out_path)
+    print(f"[save_3d_array_to_nc] Saved to: {out_path}")
+
+
+def getLatLonArea(
+        data_array,LAT,LON,
+        latmax, lonmin, latmin, lonmax,
+        withtstep = False,
+):
+    """
+    根据输入的data,lat,lon
+    计算获取对应纬度范围内的数据所在的array行列范围，同时范围对应的经纬度数组
+    withtstep: 是否有时间维度，则处理时保留第一维时间维度
+    :return:
+    """
+    leftup = getNearestPos(latmax, lonmin, LAT, LON)  # 从WRF得到站点格子
+    rightdown = getNearestPos(latmin, lonmax, LAT, LON)  # 从WRF得到站点格子
+
+    if withtstep == True:
+        data = data_array[:,leftup[0]:rightdown[0], leftup[1]:rightdown[1]]
+        LAT = LAT[leftup[0]:rightdown[0], leftup[1]:rightdown[1]]
+        LON = LON[leftup[0]:rightdown[0], leftup[1]:rightdown[1]]
+    else:
+        data = data_array[leftup[0]:rightdown[0], leftup[1]:rightdown[1]]
+        LAT = LAT[leftup[0]:rightdown[0], leftup[1]:rightdown[1]]
+        LON = LON[leftup[0]:rightdown[0], leftup[1]:rightdown[1]]
+
+    return [data, LAT, LON]
+
+def getLatlonAera_Fromshape(
+        lat,lon,shape_dir
+):
+    """
+    输入经纬度网格二维数组，以及一个经纬度shape，返回
+    """
+    import numpy as np
+    import geopandas as gpd
+    from shapely.geometry import Point, Polygon
+
+
+    lat_array = lat
+    lon_array = lon
+
+    shapefile_path = shape_dir  # 请替换为你的shp文件路径
+    gdf = gpd.read_file(shapefile_path)
+
+    # 假设你只关心第一个形状，可以根据需要选择具体的形状
+    polygon = gdf.geometry[0]
+
+    # 初始化掩码
+    mask = np.zeros(lat.shape, dtype=bool)
+
+    # 遍历格点，检查每个点是否在多边形内
+    for i in range(lat.shape[0]):
+        for j in range(lat.shape[1]):
+            point = Point(lon[i, j], lat[i, j])  # 注意顺序是 (经度, 纬度)
+            mask[i, j] = polygon.contains(point)
+
+    return mask
+
+
+def getNearestPos(station_lat, station_lon, XLAT, XLONG):
+    """
+    得到距离站点最近的经纬度索引值
+    :param station_lat:
+    :param station_lon:
+    :param XLAT:
+    :param XLONG:
+    :return:
+    """
+    difflat = station_lat - XLAT  # 经纬度数组与站点经纬度相减，找出最小的
+    difflon = station_lon - XLONG
+    rad = np.multiply(difflat, difflat) + np.multiply(difflon, difflon)  # difflat * difflat + difflon * difflon 计算最小的距离
+    aa = np.where(rad == np.min(rad))  # 查询最小的距离的点在哪里，也就是站点位置
+    ind = np.squeeze(np.array(aa))
+
+    return ind
+
+
+def getArrayVertices(ARR):
+    top_left = ARR[0, 0]
+    top_right = ARR[0, ARR.shape[1] - 1]
+    bottom_left = ARR[ARR.shape[0] - 1, 0]
+    bottom_right = ARR[ARR.shape[0] - 1, ARR.shape[1] - 1]
+    return [top_left, top_right, bottom_left, bottom_right]
+
+
+def get_latlon_from_griddesc(griddesc_path, gridname):
+    """
+    使用 PseudoNetCDF 自动解析 GRIDDESC 并生成 LAT/LON
+    ✅ 无需 camxfiles.griddesc
+    ✅ 自动读取投影参数
+    ✅ 自动生成二维经纬度
+    """
+    import PseudoNetCDF
+    grd = PseudoNetCDF.pncopen(griddesc_path, format='griddesc')
+    print(grd)
+    # grid = grd.variables[gridname]       # 直接访问对应网格
+    
+
+    lat = grd.variables['latitude'][:]       # shape (nrows, ncols)
+    lon = grd.variables['longitude'][:]
+
+    return lat.astype('float32'), lon.astype('float32')
 
 def calculate_average_wind_direction(wind_directions):
     """
@@ -48,9 +255,42 @@ def calculate_average_wind_direction(wind_directions):
         FinalWD = getWD
     return FinalWD
 
+def calculate_lambert_bounds(lat, lon, resolution_km, standard_parallels):
+    """
+    在某经纬度中心，计算前后总共resolution_km*2的方格经纬度范围bounds，坐标系为lambert
+    可以用于计算CMAQgrid的每个格点范围
+    :param lat:
+    :param lon:
+    :param resolution_km:
+    :param standard_parallels:
+    :return:
+    """
+    # 创建Lambert正形投影对象
+    proj = Proj(proj='lcc', lat_1=standard_parallels[0], lat_2=standard_parallels[1], lon_0=standard_parallels[2])
+
+    # 转换中心经纬度为投影坐标
+    x_center, y_center = proj(lon, lat)
+
+    # 计算x和y的变化量 (resolution)
+    # 先将分辨率转换为投影坐标系的单位，假设分辨率为公里
+    x_delta = resolution_km * 1000 * np.cos(lat * np.pi / 180)  # 根据纬度调整
+    y_delta = resolution_km * 1000  # 直接使用公里(注意此处可能需要调整根据具体投影的特性)
+
+    # 计算坐标范围
+    x_min = x_center - x_delta
+    x_max = x_center + x_delta
+    y_min = y_center - y_delta
+    y_max = y_center + y_delta
+
+    # 将坐标范围转换回经纬度
+    lon_min, lat_min = proj(x_min, y_min, inverse=True)
+    lon_max, lat_max = proj(x_max, y_max, inverse=True)
+
+    return (lat_min, lat_max, lon_min, lon_max)
+
 def metstationFilesTo2CSV(file, outfile, year):
     """
-    将气象站点数据转换为excel,同时补充缺失数据,成逐小时的数据格式,缺失值用-9999替换
+    将气象站点数据转换为CSV,同时补充缺失数据,成逐小时的数据格式,缺失值用-9999替换
     可根据isdsite_metdata_select中的有效站点目录来进行
     :param file:
     :param outfile:
@@ -210,3 +450,207 @@ def getAirStationsFromLatLon(uplat, downlat, leftlon, rightlon,airStation_infofi
     #             airStations.update({stationinfo[1]: [float(stationinfo[3]), float(stationinfo[4]), stationinfo[0],stationinfo[2]]})
     #                                     # 数据格式：站点名：经度 纬度 站点代号 所在城市
     return airStations
+
+
+
+
+def getAirStationsFromShape(shapefile_dir,airStation_infofile_dir):
+    import geopandas as gpd
+    from shapely.geometry import Point
+    """
+    从站点信息csv文件中，返回在某一个闭合shape文件范围(例如行政区划)内的站点信息，格式为验证代码中的字典格式
+    :param airStation_infofile_dir: 站点位置信息csv所在目录
+    :param shapefile_dir: shape文件所在路径
+    :return: airStations: 空气质量站点信息
+    """
+    airStation_infofile = pd.read_csv(airStation_infofile_dir)
+    airStations = {}
+
+    shape_polygon_ = gpd.read_file(shapefile_dir)
+    shape_polygon = shape_polygon_.to_crs(epsg=4326)
+    
+    print(shape_polygon)
+    for index, row in airStation_infofile.iterrows():
+        stationinfo = row.values.tolist()
+        if stationinfo[3] != '' or stationinfo[3] != '-':
+            if stationinfo[3] == '-': continue
+            if shape_polygon.geometry[0].contains(Point(float(stationinfo[3]), float(stationinfo[4]))):
+                airStations.update({stationinfo[1]: [float(stationinfo[3]), float(stationinfo[4]), stationinfo[0],stationinfo[2]]})
+
+    return airStations
+
+
+def getIsdMetsite_Stations_FromShape(
+    shapefile_dir,
+    year='2020',
+    metstation_files_dir="",
+    metstation_infofile_dir="",
+):
+    import geopandas as gpd
+    from shapely.geometry import Point
+    """
+    在NCDCisd site数据中，找到shape范围内数据有效的气象站点，返回站点信息字典
+    :param shapefile_dir: 目标shape范围
+    :param year: 为str格式
+    :param metstation_files_dir: isd原始文件地址 metstation_files_dir='E:\气象站数据\china_isdsite_metdata\\',
+    :param metstation_infofile_dir: 站点列表信息csv metstation_infofile_dir="E:\气象站数据\全国气象站位置信息\站点列表_原始数据.csv",
+    :return:
+    """
+    metdata_dir = metstation_files_dir
+    metstations_info_file_dir = metstation_infofile_dir
+
+    # shape_polygon_ = gpd.read_file(shapefile_dir)
+    # shape_polygon = shape_polygon_.to_crs(epsg=4326)
+
+    metstations_infofile = pd.read_csv(metstations_info_file_dir)
+    metstations = {}
+    # print(metstations_infofile)
+
+    geometry = [Point(xy) for xy in zip(metstations_infofile['Lon'], metstations_infofile['Lat'])]
+
+    gdf = gpd.GeoDataFrame(metstations_infofile, geometry=geometry)
+    shapefile_path = shapefile_dir  # 请替换为您的 shapefile 文件路径
+    gdf_shape_ = gpd.read_file(shapefile_path)
+    gdf_shape = gdf_shape_.to_crs(epsg=4326)
+    # print(111,gdf_shape)
+
+    # 第四步：检查 CRS（坐标参考系）
+    # 确保 CSV 和 shapefile 的 CRS 一致
+    # print(gdf.crs)  # 查看 GeoDataFrame 的 CRS
+    # print(gdf_shape.crs)  # 查看 shapefile 的 CRS
+
+    # 如果需要，您可以将一个 GeoDataFrame 转换为另一个 CRS
+    # gdf = gdf.to_crs(gdf_shape.crs)
+
+    # 第五步：空间连接筛选数据
+    # 使用 spatial join 选择在形状内的点
+    filtered_gdf = gpd.sjoin(gdf, gdf_shape, how='inner', predicate='within')
+    # print(filtered_gdf)
+
+    # # 第六步：保存结果
+    # output_file_path = 'filtered_coordinates.csv'  # 输出文件路径
+    # filtered_gdf.to_csv(output_file_path, index=False)
+    # print(filtered_gdf)
+
+    for row in filtered_gdf.index.tolist():
+        metstations.update({metstations_infofile.at[row, 'name']:
+                                [float(metstations_infofile.at[row, 'Lon']),
+                                 float(metstations_infofile.at[row, 'Lat']),
+                                 f'{metstations_infofile.at[row, "stationid"]}0']}) # 站点信息文件的id相较于数据文件少了个0
+        print({metstations_infofile.at[row, 'name']:
+                                [float(metstations_infofile.at[row, 'Lon']),
+                                 float(metstations_infofile.at[row, 'Lat']),
+                                 f'{metstations_infofile.at[row, "stationid"]}0']})
+        # 数据格式：站点名：经度 纬度 站点代号
+    metdatas = os.listdir(metdata_dir)
+    metdatas_year = [x for x in metdatas if x.split('-')[2] == str(year)] # 筛选目标年份
+    metdatas_id = [x.split('-')[0] for x in metdatas_year] # 筛选有数据的站点
+    metstations_keytodel = []
+    for metstation in metstations:    #气象站数据存在且有效，否则将筛选出的站点移除 数据文件大于1000字节的认为是有有效数据的气象站点文件
+        print(metstation)
+        if (str(metstations[metstation][2]) not in metdatas_id):
+            metstations_keytodel.append(metstation)
+            continue
+        elif os.stat(metdata_dir + f'{metstations[metstation][2]}-99999-{year}').st_size < 1000:
+            metstations_keytodel.append(metstation)
+        else:
+            pass
+    for m in metstations_keytodel:
+        del metstations[m]
+
+    return metstations
+
+
+def getWRFvarsCombined(WRFout_files_dir,metvar):
+    """
+    返回一个目录下所有WRFout文件的某个变量的conbine后的数组
+    :param WRFout_files_dir:
+    :param metvar:
+    :return:
+    """
+    deg = 180.0 / np.pi
+    rad = np.pi / 180.0
+
+    WRF_file_list_pr = os.listdir(WRFout_files_dir)  # 获得WRF文件列表
+    WRF_file_list = []
+    WRF_file_list_time = {}
+    for i in WRF_file_list_pr:
+        if i[0:9] == 'wrfout_d0':  #
+            WRF_file_list.append(i)
+    # print(WRF_file_list)
+    daycount = len(WRF_file_list)
+    for i in WRF_file_list:
+        time = int(i[19:21])  # 文件名称天数的位置
+        WRF_file_list_time.update({i: time})
+    WRF_file_list_time = sorted(WRF_file_list_time.items(), key=lambda x: x[1])  # 字典按时间排序
+    WRF_file_list_time = dict(WRF_file_list_time)
+    # print(WRF_file_list_time.keys())
+    # print(WRF_file_list_time)
+
+    WRFoutf = nc.Dataset(WRFout_files_dir + WRF_file_list[0])  # 打开WRF输出的HDF格式文件
+    ROW = np.array(WRFoutf.variables["XLAT"]).shape[1]  # 获得数据格式shape
+    COL = np.array(WRFoutf.variables["XLAT"]).shape[2]
+    data_shape = np.array(WRFoutf.variables["XLAT"]).shape  # 获得数据shape来存放空变量
+    metvar_now = np.zeros(data_shape, dtype=np.float64)
+    metvar_next = np.zeros(data_shape, dtype=np.float64)
+    WRFoutf.close()
+
+    WRF_file_list_time_list = list(WRF_file_list_time.keys())  # 将WRF风场数据合并为1个文件，用来求8h平均
+    # print(WRF_file_list_time_list)
+    for n in WRF_file_list_time_list:
+        n_num = WRF_file_list_time_list.index(n)
+        # print(n_num)
+        if n_num + 1 >= len(WRF_file_list_time_list):
+            metvar_combine = metvar_now
+            break
+        n2 = WRF_file_list_time_list[n_num + 1]
+        WRFoutf = nc.Dataset(WRFout_files_dir + n)  # 打开WRF输出的HDF格式文件
+        WRFoutf_next = nc.Dataset(WRFout_files_dir + n2)  # 打开WRF输出的HDF格式文件
+
+        metvar_next = np.array(WRFoutf_next.variables[metvar])  # 合并的WRF变量
+        metvar_now = np.concatenate((metvar_now, metvar_next), axis=0)  # 合并
+
+        WRFoutf.close()
+
+    return metvar_combine
+
+
+def getNCvarsTimeCombined(NC_files_glob,varname,isemis=False):
+    """
+    将一个目录下的相同数据格式类型的nc文件的varname变量按照时间进行combine
+    返回最终combine后的varname数组
+    :param NC_files_glob:glob.glob(路径)的返回值
+    :param varname:
+    :return:
+    """
+
+    # NC_file_list = os.listdir(NC_files_glob)  # 获得NC文件列表
+    NC_file_list = sorted(NC_files_glob)  # 字典按时间排序
+
+    NCfile = nc.Dataset(NC_file_list[0])  # 打开NC输出的HDF格式文件
+    data_shape = np.array(NCfile.variables[varname]).shape  # 获得数据shape来存放空变量
+    if isemis == True:
+        var_now = np.array(NCfile.variables[varname])[0:24,:,:,:]
+    else:
+        var_now = np.array(NCfile.variables[varname])
+    NCfile.close()
+
+    for n in NC_file_list:
+        n_num = NC_file_list.index(n)
+        # print(n_num)
+        if n_num + 1 >= len(NC_file_list):
+            var_combine = var_now
+            break
+        n2 = NC_file_list[n_num + 1]
+        NCfile = nc.Dataset(n)  # 打开WRF输出的HDF格式文件
+        NCfile_next = nc.Dataset(n2)  # 打开WRF输出的HDF格式文件
+
+        if isemis == True:
+            var_next = np.array(NCfile_next.variables[varname])[0:24, :, :, :]
+        else:
+            var_next = np.array(NCfile_next.variables[varname])  # 合并的WRF变量
+        var_now = np.concatenate((var_now, var_next), axis=0)  # 合并
+
+        NCfile.close()
+
+    return var_combine
