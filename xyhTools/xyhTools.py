@@ -654,3 +654,84 @@ def getNCvarsTimeCombined(NC_files_glob,varname,isemis=False):
         NCfile.close()
 
     return var_combine
+
+
+def combine_cmaq_output(folder,outtype, varname="O3"):
+        import PseudoNetCDF
+        import glob
+        """
+        将指定目录下的 CMAQ CCTM_ACONC* 文件按时间合并为一个四维数组。
+        参数:
+            folder : str
+                存放 CCTM_ACONC 文件的目录
+            outtype:
+                CCTM文件的类型，如CCTM_ACONC CCTM_IRR 
+            varname : str
+                要提取的变量名（例如 "O3", "NO2", "PM25_TOT"）
+        返回:
+            arr : numpy.ndarray
+                合并后的数组，形状为 (T, LAY, ROW, COL)
+            time_flags : numpy.ndarray
+                对应的 CMAQ 时间标志 (T, 2)，单位为 [YYYYDDD, HHMMSS]
+            info : dict
+                文件维度与变量元信息
+        """
+        
+        def safe_pncopen(f):
+            """自动尝试多种格式读取 CMAQ 文件"""
+            for fmt in ["netcdf", "netcdf4", "ioapi"]:
+                try:
+                    ds = PseudoNetCDF.pncopen(f, format=fmt)
+                    print(f"  ✅ 成功以格式 {fmt} 打开: {os.path.basename(f)}")
+                    return ds
+                except Exception as e:
+                    print(f"  ⚠️ {fmt} 打开失败: {e}")
+                    pass
+            raise IOError(f"❌ 无法识别文件格式: {f}")
+
+
+        # 找到所有 CCTM_ACONC 文件
+        files = sorted(glob.glob(os.path.join(folder, f"{outtype}*.nc")))
+        if not files:
+            raise FileNotFoundError(f"目录中未找到 {outtype}*.nc 文件: {folder}")
+
+        data_list = []
+        time_list = []
+
+        for i, f in enumerate(files):
+            print(f"[{i+1}/{len(files)}] 读取 {os.path.basename(f)} ...")
+            ds = safe_pncopen(f)
+
+            if varname not in ds.variables:
+                raise KeyError(f"变量 {varname} 不存在于文件 {f} 中，包含变量: {list(ds.variables.keys())}")
+
+            v = ds.variables[varname][:]   # shape (TSTEP, LAY, ROW, COL)
+            tflag = ds.variables["TFLAG"][:, 0, :]  # (TSTEP, 2)
+            data_list.append(v)
+            time_list.append(tflag)
+
+            ds.close()
+
+        # 沿时间拼接
+        arr = np.concatenate(data_list, axis=0)
+        time_flags = np.concatenate(time_list, axis=0)
+
+        info = {
+            "shape": arr.shape,
+            "files": files,
+            "varname": varname,
+            "description": f"{varname} combined array (T,LAY,ROW,COL)"
+        }
+
+        # print("✅ 合并完成：")
+        # print(f"   变量 {varname} 形状 = {arr.shape}")
+        # print(f"   时间步数 T = {arr.shape[0]}")
+
+        return arr
+
+
+
+
+
+
+
