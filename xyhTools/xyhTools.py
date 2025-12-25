@@ -679,7 +679,7 @@ def combine_cmaq_output(folder,outtype, varname="O3"):
         
         def safe_pncopen(f):
             """自动尝试多种格式读取 CMAQ 文件"""
-            for fmt in ["netcdf", "netcdf4", "ioapi"]:
+            for fmt in ["ioapi","netcdf", "netcdf4"]:
                 try:
                     ds = PseudoNetCDF.pncopen(f, format=fmt)
                     print(f"  ✅ 成功以格式 {fmt} 打开: {os.path.basename(f)}")
