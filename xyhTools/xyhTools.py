@@ -730,6 +730,132 @@ def combine_cmaq_output(folder,outtype, varname="O3"):
         return arr
 
 
+def plot_spatial_contourf_on_ax(
+    ax,
+    data, LON, LAT,
+    *,
+    cmap,
+    levels,
+    cb_mode="pos",          # "pos" -> 0~max；"sym" -> -absmax~absmax
+    cb_max=180,             # 当 cb_mode="pos" 时：最大值；当 cb_mode="sym" 时：absmax
+    show_cbar=True,
+    cbar_label="(µg m$^{-3}$)",
+    cbar_fraction=0.035,
+    cbar_pad=0.02,
+    cbar_extend="both",
+    cbar_nticks=9,          # 生成整数 ticks 的数量（最终会去重）
+    boundary_gdf=None,      # 例如 SCBgdf
+    boundary_kwargs=None,   # dict: edgecolor/linewidth 等
+    extent=None,            # [lon_min, lon_max, lat_min, lat_max]
+    xticks=None,
+    yticks=None,
+    title=None,
+    title_loc="left",
+    grid=True,
+    grid_kwargs=None,
+    hide_cbar=False,        # 生成 colorbar 但隐藏（你原来的 cbar1 需求）
+):
+    import numpy as np
+
+    # ---------- 1) colorbar 范围 ----------
+    if cb_mode.lower() in ["sym", "symmetric", "diff"]:
+        vmin, vmax = -float(cb_max), float(cb_max)
+    else:
+        vmin, vmax = 0.0, float(cb_max)
+
+    # levels 可直接传 np.linspace(...)；这里不强制重算，只确保在范围内
+    # （若你希望自动生成 levels，可把 levels=None 时的逻辑加进来）
+    im = ax.contourf(
+        LON, LAT, data,
+        levels=levels,
+        cmap=cmap,
+        vmin=vmin, vmax=vmax,
+        extend=cbar_extend
+    )
+
+    # ---------- 2) 边界叠加 ----------
+    if boundary_gdf is not None:
+        if boundary_kwargs is None:
+            boundary_kwargs = dict(edgecolor="k", linewidth=0.6)
+        boundary_gdf.boundary.plot(ax=ax, **boundary_kwargs)
+
+    # ---------- 3) extent / ticks ----------
+    if extent is not None:
+        lon_min, lon_max, lat_min, lat_max = extent
+        ax.set_xlim(lon_min, lon_max)
+        ax.set_ylim(lat_min, lat_max)
+
+    if xticks is not None:
+        ax.set_xticks(xticks)
+    if yticks is not None:
+        ax.set_yticks(yticks)
+
+    # ---------- 4) 网格 ----------
+    if grid:
+        if grid_kwargs is None:
+            grid_kwargs = dict(linestyle="--", linewidth=0.5, alpha=0.6)
+        ax.grid(True, **grid_kwargs)
+
+    # ---------- 5) 标题 ----------
+    if title is not None:
+        ax.set_title(title, loc=title_loc)
+
+    # ---------- 6) 坐标标签格式化：°E/°N + 去掉短刻度线 ----------
+    def _format_lon_labels(ticks):
+        out = []
+        for x in ticks:
+            if np.isnan(x):
+                out.append("")
+            else:
+                out.append(f"{int(round(x))}°E")
+        return out
+
+    def _format_lat_labels(ticks):
+        out = []
+        for y in ticks:
+            if np.isnan(y):
+                out.append("")
+            else:
+                out.append(f"{int(round(y))}°N")
+        return out
+
+    ax.set_xticklabels(_format_lon_labels(ax.get_xticks()))
+    ax.set_yticklabels(_format_lat_labels(ax.get_yticks()))
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.tick_params(axis="both", which="both", length=0)
+
+    # ---------- 7) colorbar（可隐藏） ----------
+    cbar = None
+    if show_cbar:
+        cbar = ax.figure.colorbar(
+            im, ax=ax,
+            orientation="vertical",
+            fraction=cbar_fraction,
+            pad=cbar_pad,
+            extend=cbar_extend
+        )
+
+        # 生成“整数 ticks”
+        raw_ticks = np.linspace(vmin, vmax, int(cbar_nticks))
+        int_ticks = np.unique(np.round(raw_ticks).astype(int))
+
+        # 保证端点在内
+        if int_ticks.size == 0:
+            int_ticks = np.array([int(round(vmin)), int(round(vmax))])
+        else:
+            if int_ticks[0] != int(round(vmin)):
+                int_ticks = np.insert(int_ticks, 0, int(round(vmin)))
+            if int_ticks[-1] != int(round(vmax)):
+                int_ticks = np.append(int_ticks, int(round(vmax)))
+
+        cbar.set_ticks(int_ticks)
+        cbar.set_label(cbar_label)
+
+        if hide_cbar:
+            cbar.ax.set_visible(False)
+
+    return ax, im, cbar
 
 
 
