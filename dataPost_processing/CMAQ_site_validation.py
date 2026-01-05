@@ -313,6 +313,19 @@ def CMAQ_site_validation(
     result_csv_name = "", #
     suffix = "",
 ):
+    import datetime
+    import os
+    import sys
+    import pypinyin
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    import matplotlib
+    import netCDF4 as nc
+    from tqdm import tqdm
+    from sklearn.linear_model import LinearRegression
+    from scipy.stats import gaussian_kde
     """
     使用全国公开csv逐小时基本污染物逐小时浓度数据验证CAMQ模拟结果
 
@@ -424,23 +437,125 @@ def CMAQ_site_validation(
 
         #绘制不同类型的结果图
         if 'line' in result_pic_types:
-            if os.path.exists(f'{out_dir}pics_line\\') is False: os.mkdir(f'{out_dir}pics_line\\')
+            # if os.path.exists(f'{out_dir}pics_line\\') is False: os.mkdir(f'{out_dir}pics_line\\')
+            # fig2 = plt.figure(figsize=(5, 2), dpi=200)
+            # xdate = generate_date_list_withhour(start_date,daycount*24)
+            # xdate.pop() # 会多一个h
+            # ax2 = fig2.add_subplot(111)
+            # line1, = ax2.plot(xdate, pollution1_station, linewidth=0.5, label='Obs', color='#258080')  # 要用legend画图例，这里必须,=
+            # line2, = ax2.plot(xdate, pollution1, linewidth=0.5, label='Sim', color='red')
+            # ax2.set_ylabel('μg/m$^{3}$', fontsize=10)
+            # ax2.set_xlabel('Date', fontsize=10)
+            # plt.title(f'{target_substance_obs} Concentration validation at site {stname}', fontsize=10)
+            # plt.xticks(fontsize=5)  # xticks必须在这个位置才生效
+            # plt.yticks(fontsize=5)
+            # ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))  # 设置不显示年份
+            # plt.legend((line1, line2), ('Obs', 'Sim'), loc='upper right', frameon=False, framealpha=0.5,
+            #            fontsize=5)
+            # fig2.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png')
+            # fig2.close()
+
+            if os.path.exists(f'{out_dir}pics_line\\') is False:
+                os.mkdir(f'{out_dir}pics_line\\')
+
             fig2 = plt.figure(figsize=(5, 2), dpi=200)
-            xdate = generate_date_list_withhour(start_date,daycount*24)
-            xdate.pop() # 会多一个h
+            xdate = generate_date_list_withhour(start_date, daycount * 24)
+            xdate.pop()  # 会多一个h
             ax2 = fig2.add_subplot(111)
-            line1, = ax2.plot(xdate, pollution1_station, linewidth=0.5, label='Obs', color='#258080')  # 要用legend画图例，这里必须,=
-            line2, = ax2.plot(xdate, pollution1, linewidth=0.5, label='Sim', color='red')
-            ax2.set_ylabel('μg/m$^{3}$', fontsize=10)
-            ax2.set_xlabel('Date', fontsize=10)
-            plt.title(f'{target_substance_obs} Concentration validation at site {stname}', fontsize=10)
-            plt.xticks(fontsize=5)  # xticks必须在这个位置才生效
-            plt.yticks(fontsize=5)
-            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))  # 设置不显示年份
-            plt.legend((line1, line2), ('Obs', 'Sim'), loc='upper right', frameon=False, framealpha=0.5,
-                       fontsize=5)
+
+            # ====== ② 单位：ug/m3 -> ppb（仅适用于气态；25℃, 1atm: ppb = ug/m3 * 24.45 / MW）======
+            import numpy as np
+            import pandas as pd
+
+            def _to_ppb(arr_ugm3, mw):
+                a = np.asarray(arr_ugm3, dtype=np.float32)
+                return a * (24.45 / mw)
+
+            # 常见污染物分子量（g/mol）
+            _mw_map = {
+                "O3": 48.0,
+                "NO2": 46.0055,
+                "NO": 30.0061,
+                "SO2": 64.066,
+                "CO": 28.0101,
+                "NH3": 17.031,
+                "HCHO": 30.026,
+            }
+
+            # 从 target_substance_obs 中提取类似 O3/NO2/SO2 这类 key
+            # _key = re.sub(r"[^A-Za-z0-9]+", "", str(target_substance_obs).upper())
+            _key = "O3"
+            mw = _mw_map.get(_key, None)
+
+            # 处理缺测：统一转为 float，并用 NaN 掩膜
+            obs = pd.to_numeric(pd.Series(pollution1_station), errors="coerce").to_numpy(dtype=np.float32)
+            sim = pd.to_numeric(pd.Series(pollution1), errors="coerce").to_numpy(dtype=np.float32)
+
+            if mw is not None:
+                obs_ppb = _to_ppb(obs, mw)
+                sim_ppb = _to_ppb(sim, mw)
+                ylab = "ppb"
+            else:
+                # 若识别不到分子量（例如 PM2.5），ppb 不适用：退回原单位，避免输出错误单位
+                obs_ppb = obs
+                sim_ppb = sim
+                ylab = "μg/m$^{3}$"
+
+            # ====== ③ 指标：IOA / MB / RMSE（基于有效值 mask）======
+            mask = np.isfinite(obs_ppb) & np.isfinite(sim_ppb)
+            if np.any(mask):
+                O = obs_ppb[mask]
+                P = sim_ppb[mask]
+                Obar = np.mean(O)
+
+                # IOA (Willmott)
+                denom = np.sum((np.abs(P - Obar) + np.abs(O - Obar)) ** 2)
+                ioa = 1.0 - (np.sum((P - O) ** 2) / denom) if denom > 0 else np.nan
+
+                # Mean Bias & RMSE
+                mb = np.mean(P - O)
+                rmse = np.sqrt(np.mean((P - O) ** 2))
+            else:
+                ioa, mb, rmse = np.nan, np.nan, np.nan
+
+            # ====== ① 优化绘图：更清爽的轴、网格、legend、日期 ======
+            line1, = ax2.plot(xdate, obs_ppb, linewidth=0.9, label='Obs', color='#258080')
+            line2, = ax2.plot(xdate, sim_ppb, linewidth=0.9, label='Sim', color='red', alpha=0.85)
+
+            ax2.set_ylabel(ylab, fontsize=9)
+            ax2.set_xlabel('Date', fontsize=9)
+
+            # 只显示月-日
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            ax2.tick_params(axis='x', labelsize=6, rotation=0)
+            ax2.tick_params(axis='y', labelsize=6)
+
+            # 细网格
+            ax2.grid(True, which='major', linewidth=0.3, alpha=0.35)
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+
+            # 曲线图例（右上角）
+            ax2.legend(loc='upper right', frameon=False, fontsize=6, handlelength=2.2, borderaxespad=0.2)
+
+            # 指标文字（图上方，类似 legend）
+            metric_txt = f"IOA={ioa:.2f}   MB={mb:.2f} {ylab}   RMSE={rmse:.2f} {ylab}"
+            ax2.text(
+                0.0, 1.08, metric_txt,
+                transform=ax2.transAxes,
+                ha='left', va='bottom',
+                fontsize=6,
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8)
+            )
+
+            # 标题（略紧凑）
+            ax2.set_title(f'{stname}',loc='right', fontsize=6)
+
+            fig2.tight_layout()
             fig2.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png')
-            fig2.close()
+            plt.close(fig2)
+
+
         if 'scatter' in result_pic_types:
             if os.path.exists(f'{out_dir}pics_scatter\\') is False: os.mkdir(f'{out_dir}pics_scatter\\')
             plt.figure(figsize=(6, 6) ,dpi=200)
