@@ -372,7 +372,7 @@ def CMAQ_site_validation(
     print(airStation_locations)
 
 
-    labels = ['站点', 'MAE', 'R', 'IOA', 'NMB', 'NME','MFE', 'MFB','FE', 'FB', '站点经度', '站点纬度', '城市']
+    labels = ['站点', 'MAE','RSME', 'R', 'IOA', 'NMB', 'NME','MFE', 'MFB','FE', 'FB', '站点经度', '站点纬度', '城市']
     result_csv_data = pd.DataFrame(columns=labels) # 创建记录结果的csv
 
     airStation_csv_list = [] # 验证时间内的所有csv
@@ -603,6 +603,7 @@ def CMAQ_site_validation(
         计算精度系数
         """
         substanceMAE = calcuMAE(pollution1, pollution1_station)
+        substanceRSME = calcuRSME(pollution1, pollution1_station)
         substanceR = calcuR(pollution1, pollution1_station)
         substanceIOA = calcuIOA(pollution1, pollution1_station)
         substanceNMB = calcuNMB(pollution1, pollution1_station)
@@ -613,6 +614,7 @@ def CMAQ_site_validation(
         substanceFB = calcuFB(pollution1, pollution1_station)
         result_csv_data.at[csv_row, '站点'] = stname
         result_csv_data.at[csv_row, 'MAE'] = substanceMAE
+        result_csv_data.at[csv_row, 'RSME'] = substanceRSME
         result_csv_data.at[csv_row, 'R'] = substanceR
         result_csv_data.at[csv_row, 'IOA'] = substanceIOA
         result_csv_data.at[csv_row, 'NMB'] = substanceNMB

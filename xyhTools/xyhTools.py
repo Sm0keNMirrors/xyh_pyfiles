@@ -861,3 +861,56 @@ def plot_spatial_contourf_on_ax(
 
 
 
+def stitch_png(img1_path, img2_path, out_path, mode="h", align="center", bg=(255, 255, 255)):
+    from PIL import Image
+    """
+    mode: "h" 横向拼接, "v" 竖向拼接
+    align: 对齐方式（沿拼接垂直方向的对齐）："top"/"center"/"bottom" 或 "left"/"center"/"right"
+    bg: 背景色（用于补齐空白）
+    # # ===== 用法 =====
+    # stitch_png("a.png", "b.png", "out_h.png", mode="h", align="center")  # 横向
+    # stitch_png("a.png", "b.png", "out_v.png", mode="v", align="center")  # 竖向
+    """
+    im1 = Image.open(img1_path).convert("RGBA")
+    im2 = Image.open(img2_path).convert("RGBA")
+
+    w1, h1 = im1.size
+    w2, h2 = im2.size
+
+    if mode.lower() == "h":
+        out_w = w1 + w2
+        out_h = max(h1, h2)
+        canvas = Image.new("RGBA", (out_w, out_h), bg + (255,))
+
+        def yoff(h):
+            if align == "top": return 0
+            if align == "bottom": return out_h - h
+            return (out_h - h) // 2  # center
+
+        canvas.paste(im1, (0, yoff(h1)), im1)
+        canvas.paste(im2, (w1, yoff(h2)), im2)
+
+    elif mode.lower() == "v":
+        out_w = max(w1, w2)
+        out_h = h1 + h2
+        canvas = Image.new("RGBA", (out_w, out_h), bg + (255,))
+
+        def xoff(w):
+            if align == "left": return 0
+            if align == "right": return out_w - w
+            return (out_w - w) // 2  # center
+
+        canvas.paste(im1, (xoff(w1), 0), im1)
+        canvas.paste(im2, (xoff(w2), h1), im2)
+
+    else:
+        raise ValueError("mode 必须是 'h' 或 'v'")
+
+    # 输出 png（去掉 alpha 也行）
+    canvas.save(out_path)
+
+
+
+
+
+
