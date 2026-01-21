@@ -372,7 +372,7 @@ def CMAQ_site_validation(
     print(airStation_locations)
 
 
-    labels = ['站点', 'MAE','RSME', 'R', 'IOA', 'NMB', 'NME','MFE', 'MFB','FE', 'FB', '站点经度', '站点纬度', '城市']
+    labels = ['站点', 'MAE','RMSE', 'R', 'IOA', 'NMB', 'NME','MFE', 'MFB','FE', 'FB', '站点经度', '站点纬度', '城市']
     result_csv_data = pd.DataFrame(columns=labels) # 创建记录结果的csv
 
     airStation_csv_list = [] # 验证时间内的所有csv
@@ -602,19 +602,19 @@ def CMAQ_site_validation(
         """
         计算精度系数
         """
-        substanceMAE = calcuMAE(pollution1, pollution1_station)
-        substanceRSME = calcuRSME(pollution1, pollution1_station)
-        substanceR = calcuR(pollution1, pollution1_station)
-        substanceIOA = calcuIOA(pollution1, pollution1_station)
-        substanceNMB = calcuNMB(pollution1, pollution1_station)
-        substanceNME = calcuNME(pollution1, pollution1_station)
-        substanceMFE = calcuMFE(pollution1, pollution1_station)
-        substanceMFB = calcuMFB(pollution1, pollution1_station)
-        substanceFE = calcuFE(pollution1, pollution1_station)
-        substanceFB = calcuFB(pollution1, pollution1_station)
+        substanceMAE = calcuMAE(sim_ppb, obs_ppb)
+        substanceRSME = calcuRSME(sim_ppb, obs_ppb)
+        substanceR = calcuR(sim_ppb, obs_ppb)
+        substanceIOA = calcuIOA(sim_ppb, obs_ppb)
+        substanceNMB = calcuNMB(sim_ppb, obs_ppb)
+        substanceNME = calcuNME(sim_ppb, obs_ppb)
+        substanceMFE = calcuMFE(sim_ppb, obs_ppb)
+        substanceMFB = calcuMFB(sim_ppb, obs_ppb)
+        substanceFE = calcuFE(sim_ppb, obs_ppb)
+        substanceFB = calcuFB(sim_ppb, obs_ppb)
         result_csv_data.at[csv_row, '站点'] = stname
         result_csv_data.at[csv_row, 'MAE'] = substanceMAE
-        result_csv_data.at[csv_row, 'RSME'] = substanceRSME
+        result_csv_data.at[csv_row, 'RMSE'] = substanceRSME
         result_csv_data.at[csv_row, 'R'] = substanceR
         result_csv_data.at[csv_row, 'IOA'] = substanceIOA
         result_csv_data.at[csv_row, 'NMB'] = substanceNMB
@@ -623,8 +623,8 @@ def CMAQ_site_validation(
         result_csv_data.at[csv_row, 'MFB'] = substanceMFB
         result_csv_data.at[csv_row, 'FE'] = substanceFE
         result_csv_data.at[csv_row, 'FB'] = substanceFB
-        result_csv_data.at[csv_row, '站点经度'] = airstation[1]
-        result_csv_data.at[csv_row, '站点纬度'] = airstation[0]
+        result_csv_data.at[csv_row, '站点纬度'] = airstation[1]
+        result_csv_data.at[csv_row, '站点经度'] = airstation[0]
         result_csv_data.at[csv_row, '城市'] = airstation[3]
         csv_row += 1
         plotcount+=1

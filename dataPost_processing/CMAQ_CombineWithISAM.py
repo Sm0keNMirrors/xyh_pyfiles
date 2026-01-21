@@ -109,7 +109,7 @@ def CMAQ_CombineWithISAM(
         Combine_substance = combined_tagged_subs
 
     # 准备好combine的文件群并查找变量信息
-    combine_file_namestr = 'SAACONC'  # 合并的CCTM文件名称类型，CCTM_ 之后的2个_隔开的名称相加
+    combine_file_namestr = 'ACONCv533'  # 合并的CCTM文件名称类型，CCTM_ 之后的2个_隔开的名称相加
     SA_CCTM_file_list = os.listdir(CCTM_dir)  # CCTM
     to_combine_files_list = []
     DIAG_files_list = []
