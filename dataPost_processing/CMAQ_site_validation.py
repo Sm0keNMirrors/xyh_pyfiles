@@ -295,6 +295,63 @@ def calculate_figRowCol_size(x):
     m = int(math.ceil(x / n))          # 列数
     return n, m
 
+def chinese_to_pinyin(
+    text: str,
+    mode: str = "abbr",          # "abbr"=首字母简写, "full"=全拼
+    uppercase: bool = True,      # 是否大写（对 abbr 更常用）
+    separator: str = "",         # full 模式拼音之间的分隔符，如 "_" / " " / ""
+    keep_non_chinese: bool = False,  # 是否保留非中文字符（数字/字母/符号）
+) -> str:
+    """
+    将中文字符串转换为拼音（全拼 or 首字母简写）。
+
+    参数：
+        text: 输入字符串（中文为主）
+        mode:
+            - "abbr": 每个汉字取拼音首字母（缩写）
+            - "full": 每个汉字取完整拼音（全拼）
+        uppercase: 是否转大写（abbr常用；full也可用）
+        separator: full 模式下拼音间的连接符（abbr 模式会忽略该参数）
+        keep_non_chinese: 是否保留非中文字符
+
+    返回：
+        转换后的拼音字符串
+    """
+    from pypinyin import pinyin, Style
+    import re
+
+    if not isinstance(text, str):
+        text = str(text)
+
+    if mode not in ("abbr", "full"):
+        raise ValueError("mode must be 'abbr' or 'full'")
+
+    style = Style.FIRST_LETTER if mode == "abbr" else Style.NORMAL
+    py_list = pinyin(text, style=style, strict=False)
+
+    out = []
+    for ch, item in zip(text, py_list):
+        token = item[0]
+
+        is_chinese = bool(re.match(r'[\u4e00-\u9fff]', ch))
+
+        if is_chinese:
+            out.append(token.upper() if uppercase else token.lower())
+        else:
+            if keep_non_chinese:
+                # 非中文字符：原样保留（字母按 uppercase 处理）
+                if token.isalpha():
+                    out.append(token.upper() if uppercase else token.lower())
+                else:
+                    out.append(token)
+            # 否则忽略
+
+    if mode == "full":
+        return separator.join(out)
+    else:
+        return "".join(out)
+
+
 def CMAQ_site_validation(
     start_date='YYYY-MM-DD',
     daycount=5, #
@@ -549,12 +606,11 @@ def CMAQ_site_validation(
             )
 
             # 标题（略紧凑）
-            ax2.set_title(f'{stname}',loc='right', fontsize=6)
+            ax2.set_title(f'{chinese_to_pinyin(stcity,mode="full")}',loc='right', fontsize=6)
 
             fig2.tight_layout()
-            fig2.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png')
+            fig2.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png',bbox_inches="tight",dpi=600)
             plt.close(fig2)
-
 
         if 'scatter' in result_pic_types:
             if os.path.exists(f'{out_dir}pics_scatter\\') is False: os.mkdir(f'{out_dir}pics_scatter\\')
