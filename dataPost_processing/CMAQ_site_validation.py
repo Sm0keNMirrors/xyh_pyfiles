@@ -126,7 +126,7 @@ def calcuNMB(modData, obsData):
             continue
         ALL1 += modData[i] - obsData[i]
         ALL2 += obsData[i]
-    return ALL1 / ALL2
+    return ALL1 / ALL2 * 100
 
 def calcuNME(modData, obsData):
     N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
@@ -137,7 +137,7 @@ def calcuNME(modData, obsData):
             continue
         ALL1 += abs(modData[i] - obsData[i])
         ALL2 += obsData[i]
-    return ALL1 / ALL2
+    return ALL1 / ALL2 * 100
 
 def calcuMFE(modData, obsData):
     N = len(modData) if len(modData) < len(obsData) else len(obsData)  # 不过限度
@@ -361,6 +361,7 @@ def CMAQ_site_validation(
     target_substances = [], #
     target_substance_obs = '', #
     Molar_mass = 0, #
+    ifdaily=False,
     airstation_files_dir = "",
     airstation_infofile_dir = "",
     airstation_selected = [],
@@ -394,6 +395,7 @@ def CMAQ_site_validation(
     :param target_substances: 目标污染物，若输入多个，则是几个污染物类型的和，如不同ISAMtag相加的总量
     :param target_substance_obs: 观测数据中的污染物名称，用于获取，不同于CMAQ的输出nc，一般验证只会获取一类
     :param Molar_mass: ppm为单位的物质的摩尔质量，为0时则不进行转换，如PM2.5，直接为ug
+    ifdaily: 是否以日均值进行验证
     :param airstation_files_dir: 包含观测站数据的csv文件所在文件夹
     :param airstation_infofile_dir: 包含观测站信息的csv文件路径
     :param airstation_selected: 选择性得仅输出名字为这些站点的验证结果，当[]时或不指定则输出范围内的全部站点
@@ -446,47 +448,58 @@ def CMAQ_site_validation(
             fig_c, axs_c = plt.subplots(nn, mm, figsize=(18, 18), dpi=300,)  # 创建 子图布局
     csv_row = 1 # csv非表头的第1行开始写入
     plotcount = 0 # 绘制子图的计数
-    for airstation in tqdm(airStation_locations.values(),desc='处理所有有效站点...'): # 从站点列表处理每一个站点
-        stname = list(airStation_locations.keys())[list(airStation_locations.values()).index(airstation)]  # 通过值k获取字典dic对应键的公式： list(dic.keys())[list(dic.values()).index(k)]
+
+    substance = None
+    for sub in target_substances:
+        arr = np.array(CMAQoutf.variables[sub][:], dtype=np.float32)
+        if substance is None:
+            substance = arr
+        else:
+            substance += arr
+
+    CMAQXLAT = np.array(GRIDCRO2D.variables['LAT'][:][0])
+    CMAQXLONG = np.array(GRIDCRO2D.variables['LON'][:][0])
+
+    air_csv_data = [pd.read_csv(m) for m in airStation_csv_list]
+
+    for stname, airstation in tqdm(airStation_locations.items(), desc='处理所有有效站点...'):
         # 读取经纬度与网格关系数据
         stcity = airStation_locations[stname][3]
-        CMAQXLAT = np.array(GRIDCRO2D.variables['LAT'][:][0])
-        CMAQXLONG = np.array(GRIDCRO2D.variables['LON'][:][0])
+
         nearpos = getNearestPos(airstation[1], airstation[0], CMAQXLAT, CMAQXLONG)  # 从WRF得到站点格子
         nearlat = nearpos[1]  # 与WRF获取最近点不同
         nearlon = nearpos[2]
 
-        subdata_shape = np.array(CMAQoutf.variables[target_substances[0]][:]).shape  # 获得数据shape来存放all
-        substance = np.zeros(subdata_shape,'float64')
-        for sub in target_substances:
-            substance += np.array(CMAQoutf.variables[sub][:])
+        # subdata_shape = np.array(CMAQoutf.variables[target_substances[0]][:]).shape  # 获得数据shape来存放all
+        # substance = np.zeros(subdata_shape,'float64')
+        # for sub in target_substances:
+        #     substance += np.array(CMAQoutf.variables[sub][:])
         target = substance[:, 0, nearlat, nearlon]
         if Molar_mass != 0 : target = target * Molar_mass / 22.4 * 1000
         substance_station = target
         pollution1 = substance_station[simdata_inithour:simdata_inithour+24*daycount]  # 得到UTC+8后的8月1-8月31
 
-        # 读取观测值csv列表来获取整个观测值数组
         pollution1_station_pre = []
-        for m in airStation_csv_list:
-            airStation_csv = pd.read_csv(m)
-            matching_rows = airStation_csv[airStation_csv['type'] == target_substance_obs].index.tolist() # 获取对应物质所在列
-            matching_hours = airStation_csv.loc[matching_rows, 'hour'].astype(int) # 查看有哪些小时
-            fill_hours = list(missing_hour_fill(matching_hours))
-            for hour in fill_hours: # 检测从某日csv文件获取的是否有缺失小时，有则顺序补充nan
-                if hour == np.nan:
-                    pollution1_station_pre.append(np.nan)
-                else:
-                    target_row = airStation_csv[(airStation_csv['hour'] == hour) & (airStation_csv['type'] == target_substance_obs)]
-                    # print(target_row[airstation[2]].values)
-                    if airstation[2] in airStation_csv.columns and np.array(target_row[airstation[2]]).size > 0 : # 判断目标站点是否存在，不存在添加空值
-                        pollution1_station_pre.append(target_row[airstation[2]].values[0])
-                    else:
-                        pollution1_station_pre.append(np.nan)
-            # pollution1_station_pre1 = airStation_csv.loc[matching_rows, target_col]
-            # pollution1_station_pre += pollution1_station_pre1.replace('', np.nan).astype(int).tolist()
+        station_col = airstation[2]
 
-        # 判断站点数据是否是全空的，是则跳过对这个站点的结果输出
-        # print((np.isnan(np.array(pollution1_station))).all())
+        for df in air_csv_data:
+            subdf = df[df['type'] == target_substance_obs]
+
+            if subdf.empty or station_col not in subdf.columns:
+                pollution1_station_pre.extend([np.nan] * 24)
+                continue
+
+            subdf = subdf[['hour', station_col]].copy()
+            subdf['hour'] = pd.to_numeric(subdf['hour'], errors='coerce')
+            subdf = subdf.dropna(subset=['hour'])
+            subdf['hour'] = subdf['hour'].astype(int)
+
+            hour_map = dict(zip(subdf['hour'], subdf[station_col]))
+
+            for hour in range(24):
+                pollution1_station_pre.append(hour_map.get(hour, np.nan))
+
+        pollution1_station = np.asarray(pollution1_station_pre, dtype=np.float32)
         if (np.isnan(np.array(pollution1_station_pre))).all():
             continue
         pollution1_station = pollution1_station_pre  # 原始小时值情形
@@ -494,23 +507,6 @@ def CMAQ_site_validation(
 
         #绘制不同类型的结果图
         if 'line' in result_pic_types:
-            # if os.path.exists(f'{out_dir}pics_line\\') is False: os.mkdir(f'{out_dir}pics_line\\')
-            # fig2 = plt.figure(figsize=(5, 2), dpi=200)
-            # xdate = generate_date_list_withhour(start_date,daycount*24)
-            # xdate.pop() # 会多一个h
-            # ax2 = fig2.add_subplot(111)
-            # line1, = ax2.plot(xdate, pollution1_station, linewidth=0.5, label='Obs', color='#258080')  # 要用legend画图例，这里必须,=
-            # line2, = ax2.plot(xdate, pollution1, linewidth=0.5, label='Sim', color='red')
-            # ax2.set_ylabel('μg/m$^{3}$', fontsize=10)
-            # ax2.set_xlabel('Date', fontsize=10)
-            # plt.title(f'{target_substance_obs} Concentration validation at site {stname}', fontsize=10)
-            # plt.xticks(fontsize=5)  # xticks必须在这个位置才生效
-            # plt.yticks(fontsize=5)
-            # ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))  # 设置不显示年份
-            # plt.legend((line1, line2), ('Obs', 'Sim'), loc='upper right', frameon=False, framealpha=0.5,
-            #            fontsize=5)
-            # fig2.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png')
-            # fig2.close()
 
             if os.path.exists(f'{out_dir}pics_line\\') is False:
                 os.mkdir(f'{out_dir}pics_line\\')
@@ -545,8 +541,9 @@ def CMAQ_site_validation(
             mw = _mw_map.get(_key, None)
 
             # 处理缺测：统一转为 float，并用 NaN 掩膜
-            obs = pd.to_numeric(pd.Series(pollution1_station), errors="coerce").to_numpy(dtype=np.float32)
-            sim = pd.to_numeric(pd.Series(pollution1), errors="coerce").to_numpy(dtype=np.float32)
+            obs = np.asarray(pollution1_station, dtype=np.float32)
+            sim = np.asarray(pollution1, dtype=np.float32)
+
 
             if mw is not None:
                 obs_ppb = _to_ppb(obs, mw)
@@ -558,11 +555,56 @@ def CMAQ_site_validation(
                 sim_ppb = sim
                 ylab = "μg/m$^{3}$"
 
-            # ====== ③ 指标：IOA / MB / RMSE（基于有效值 mask）======
-            mask = np.isfinite(obs_ppb) & np.isfinite(sim_ppb)
+            # =========================================================
+            # 可选：逐小时 / 逐天
+            # ifdaily=True  -> 逐天验证
+            # ifdaily=False -> 逐小时验证（保持原逻辑）
+            # daycount 已在前文获得
+            # xdate 若为逐小时时间轴，则这里会自动生成逐天时间轴 daily_xdate
+            # =========================================================
+            if ifdaily:
+                # 保险起见，最多只取完整的 daycount*24 个值
+                n_need = daycount * 24
+                n_avail = min(len(obs_ppb), len(sim_ppb), n_need)
+
+                obs_use = obs_ppb[:n_avail]
+                sim_use = sim_ppb[:n_avail]
+
+                # 如果长度不足整天，截到完整天
+                n_day_valid = n_avail // 24
+                obs_use = obs_use[:n_day_valid * 24]
+                sim_use = sim_use[:n_day_valid * 24]
+
+                # reshape 成 (天数, 24小时)
+                obs_day_2d = obs_use.reshape(n_day_valid, 24)
+                sim_day_2d = sim_use.reshape(n_day_valid, 24)
+
+                # 每天平均；自动跳过 NaN
+                obs_plot = np.nanmean(obs_day_2d, axis=1)
+                sim_plot = np.nanmean(sim_day_2d, axis=1)
+
+                # 若某一天 24 个值全是 NaN，np.nanmean 会给 warning，结果仍为 NaN
+                # 这里构造逐天时间轴
+                # 假设 xdate 是逐小时时间序列，则每24个取第1个作为当天标签
+                if len(xdate) >= n_day_valid * 24:
+                    daily_xdate = np.asarray(xdate[:n_day_valid * 24])[::24]
+                else:
+                    # 若 xdate 长度不够，退化为前 n_day_valid 个
+                    daily_xdate = np.asarray(xdate[:n_day_valid])
+
+                x_plot = daily_xdate
+                xlabel = 'Date (Daily)'
+            else:
+                obs_plot = obs_ppb
+                sim_plot = sim_ppb
+                x_plot = xdate
+                xlabel = 'Date'
+
+            # ====== ③ 指标：IOA / MB / RMSE（基于当前有效值 mask）======
+            mask = np.isfinite(obs_plot) & np.isfinite(sim_plot)
             if np.any(mask):
-                O = obs_ppb[mask]
-                P = sim_ppb[mask]
+                O = obs_plot[mask]
+                P = sim_plot[mask]
                 Obar = np.mean(O)
 
                 # IOA (Willmott)
@@ -576,11 +618,11 @@ def CMAQ_site_validation(
                 ioa, mb, rmse = np.nan, np.nan, np.nan
 
             # ====== ① 优化绘图：更清爽的轴、网格、legend、日期 ======
-            line1, = ax2.plot(xdate, obs_ppb, linewidth=0.9, label='Obs', color='#258080')
-            line2, = ax2.plot(xdate, sim_ppb, linewidth=0.9, label='Sim', color='red', alpha=0.85)
+            line1, = ax2.plot(x_plot, obs_plot, linewidth=0.9, label='Obs', color='#258080')
+            line2, = ax2.plot(x_plot, sim_plot, linewidth=0.9, label='Sim', color='red', alpha=0.85)
 
             ax2.set_ylabel(ylab, fontsize=9)
-            ax2.set_xlabel('Date', fontsize=9)
+            ax2.set_xlabel(xlabel, fontsize=9)
 
             # 只显示月-日
             ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
@@ -606,11 +648,42 @@ def CMAQ_site_validation(
             )
 
             # 标题（略紧凑）
-            ax2.set_title(f'{chinese_to_pinyin(stcity,mode="full")}',loc='right', fontsize=6)
+            ax2.set_title(f'{chinese_to_pinyin(stcity, mode="full")}', loc='right', fontsize=6)
 
             fig2.tight_layout()
-            fig2.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png',bbox_inches="tight",dpi=600)
+            fig2.savefig(f'{out_dir}pics_line\\{stname}_{suffix}.png', bbox_inches="tight", dpi=600)
             plt.close(fig2)
+
+            # ====== 额外输出：每个站点一个逐小时 obs/sim csv ======
+            if 'csv' in result_pic_types or True:
+                csv_dir = f'{out_dir}csv_hour\\'
+                if os.path.exists(csv_dir) is False:
+                    os.mkdir(csv_dir)
+
+                # 逐小时时间轴
+                xdate_hour = generate_date_list_withhour(start_date, daycount * 24)
+                xdate_hour.pop()  # 保持和你原来一致，去掉多出来的一个小时
+
+                # 与数据长度对齐，避免长度不一致报错
+                n_hour = min(len(xdate_hour), len(obs_ppb), len(sim_ppb))
+
+                df_hour = pd.DataFrame({
+                    'datetime': xdate_hour[:n_hour],
+                    'obs': obs_ppb[:n_hour],
+                    'sim': sim_ppb[:n_hour],
+                })
+
+                # 如果想保留原单位，也可以一起输出
+                # df_hour['obs_raw'] = obs[:n_hour]
+                # df_hour['sim_raw'] = sim[:n_hour]
+
+                df_hour.to_csv(
+                    f'{csv_dir}{stname}_{suffix}.csv',
+                    index=False,
+                    encoding='utf-8-sig'
+                )
+
+
 
         if 'scatter' in result_pic_types:
             if os.path.exists(f'{out_dir}pics_scatter\\') is False: os.mkdir(f'{out_dir}pics_scatter\\')
@@ -712,22 +785,22 @@ if __name__ == '__main__':
     #     suffix='IAave'
     # )
 
-    CMAQ_site_validation(   # CQMLEM
-        start_date='2020-01-02',
-        daycount=27,
-        simdata_inithour=16,
-        GRIDCRO2D_file_dir="E:\SichuanCMAQPMtrends\GRIDCRO2D_d03.nc",
-        Combine_file_dir="E:\CQemis_ML2hourly\COMBINE_ACONC_v532_gcc_20200101_202001.nc",
-        target_substances=['PM25_TOT'],
-        target_substance_obs='PM2.5',
-        Molar_mass=0,
-        airstation_files_dir=r'E:\全国空气质量\全国站点小时浓度csv_files\\',
-        airstation_infofile_dir="E:\全国空气质量\_站点列表\站点列表-2022.02.13起.csv",
-        result_pic_types=['line','scatter'],
-        out_dir=r'E:\CQemis_ML2hourly\validation\\',
-        result_csv_name='validationPara',
-        suffix='CQMLEM'
-    )
+    # CMAQ_site_validation(   # CQMLEM
+    #     start_date='2020-01-02',
+    #     daycount=27,
+    #     simdata_inithour=16,
+    #     GRIDCRO2D_file_dir="E:\SichuanCMAQPMtrends\GRIDCRO2D_d03.nc",
+    #     Combine_file_dir="E:\CQemis_ML2hourly\COMBINE_ACONC_v532_gcc_20200101_202001.nc",
+    #     target_substances=['PM25_TOT'],
+    #     target_substance_obs='PM2.5',
+    #     Molar_mass=0,
+    #     airstation_files_dir=r'E:\全国空气质量\全国站点小时浓度csv_files\\',
+    #     airstation_infofile_dir="E:\全国空气质量\_站点列表\站点列表-2022.02.13起.csv",
+    #     result_pic_types=['line','scatter'],
+    #     out_dir=r'E:\CQemis_ML2hourly\validation\\',
+    #     result_csv_name='validationPara',
+    #     suffix='CQMLEM'
+    # )
 
     # CMAQ_site_validation(   # CQMLEM_origin
     #     start_date='2020-01-02',
