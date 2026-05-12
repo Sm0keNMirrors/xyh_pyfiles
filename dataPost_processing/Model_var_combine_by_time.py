@@ -105,6 +105,7 @@ def decode_cmaq_tflag(
     ds: xr.Dataset,
     var_name: str,
     tflag_name: str = "TFLAG",
+    n_tsteps: Optional[int] = None,
 ) -> Optional[pd.DatetimeIndex]:
     """
     解码 CMAQ / IOAPI 的 TFLAG 时间变量。
@@ -136,9 +137,21 @@ def decode_cmaq_tflag(
 
     datetimes = []
 
-    for i in range(tflag.shape[0]):
+    if n_tsteps is None:
+        n_tsteps = tflag.shape[0]
+    else:
+        n_tsteps = min(int(n_tsteps), tflag.shape[0])
+
+    for i in range(n_tsteps):
         yyyyddd = int(tflag[i, var_index, 0])
         hhmmss = int(tflag[i, var_index, 1])
+
+        if yyyyddd <= 0:
+            raise ValueError(
+                f"TFLAG 第 {i} 个时间步日期无效：{yyyyddd}。"
+                "如果 CMAQ 文件每天包含 25 个 TSTEP 且最后一个为空，"
+                "请在 combine 时启用 cmaq_drop_last_tstep=True。"
+            )
 
         year = yyyyddd // 1000
         day_of_year = yyyyddd % 1000
@@ -179,20 +192,22 @@ def get_time_coordinate(
     if time_source == "none":
         return None
 
+    expected_len = data_array.sizes[time_dim]
+
     if time_source in ("coord", "auto"):
         if time_dim in ds.coords:
             values = ds[time_dim].values
-            if len(values) == data_array.sizes[time_dim]:
-                return values
+            if len(values) >= expected_len:
+                return values[:expected_len]
 
     if time_source in ("wrf", "auto"):
         wrf_time = decode_wrf_times(ds)
-        if wrf_time is not None and len(wrf_time) == data_array.sizes[time_dim]:
-            return wrf_time
+        if wrf_time is not None and len(wrf_time) >= expected_len:
+            return wrf_time[:expected_len]
 
     if time_source in ("cmaq", "auto"):
-        cmaq_time = decode_cmaq_tflag(ds, var_name)
-        if cmaq_time is not None and len(cmaq_time) == data_array.sizes[time_dim]:
+        cmaq_time = decode_cmaq_tflag(ds, var_name, n_tsteps=expected_len)
+        if cmaq_time is not None and len(cmaq_time) == expected_len:
             return cmaq_time
 
     return None
@@ -386,6 +401,9 @@ def Model_var_combine_by_time(
     grid_lon_name: str = "LON",
     output_lat_name: str = "LAT",
     output_lon_name: str = "LON",
+    cmaq_drop_last_tstep: bool = True,
+    cmaq_expected_tstep_per_file: int = 25,
+    cmaq_keep_tstep_per_file: int = 24,
     verbose: bool = True,
     show_progress: bool = True,
 ) -> xr.Dataset:
@@ -489,6 +507,17 @@ def Model_var_combine_by_time(
     verbose : bool
         是否打印处理信息。
 
+    cmaq_drop_last_tstep : bool
+        是否对 CMAQ 日文件自动忽略最后一个多余 TSTEP。
+        默认 True。仅当识别为 CMAQ 数据且单文件时间步数等于
+        cmaq_expected_tstep_per_file 时生效。
+
+    cmaq_expected_tstep_per_file : int
+        CMAQ 单文件原始 TSTEP 数。默认 25。
+
+    cmaq_keep_tstep_per_file : int
+        CMAQ 单文件实际参与 combine 的 TSTEP 数。默认 24。
+
     show_progress : bool
         是否显示 tqdm 进度条。
 
@@ -588,6 +617,44 @@ def Model_var_combine_by_time(
                     f"当前维度: {current_signature}"
                 )
 
+            nt_original = da.sizes[current_time_dim]
+
+            is_cmaq_like = (
+                time_source == "cmaq"
+                or (
+                    time_source == "auto"
+                    and current_time_dim.upper() == "TSTEP"
+                    and "TFLAG" in ds
+                )
+            )
+
+            if (
+                cmaq_drop_last_tstep
+                and is_cmaq_like
+                and nt_original == cmaq_expected_tstep_per_file
+            ):
+                da = da.isel(
+                    {
+                        current_time_dim: slice(
+                            0,
+                            cmaq_keep_tstep_per_file,
+                        )
+                    }
+                )
+                print_info(
+                    f"CMAQ 文件 {Path(file_path).name} 原始 TSTEP={nt_original}，"
+                    f"已忽略最后 {nt_original - cmaq_keep_tstep_per_file} 个，"
+                    f"仅使用前 {cmaq_keep_tstep_per_file} 个时间步",
+                    verbose,
+                )
+            elif cmaq_drop_last_tstep and is_cmaq_like:
+                print_info(
+                    f"CMAQ 文件 {Path(file_path).name} 当前 TSTEP={nt_original}，"
+                    f"不等于 cmaq_expected_tstep_per_file={cmaq_expected_tstep_per_file}，"
+                    "未自动裁剪",
+                    verbose,
+                )
+
             nt = da.sizes[current_time_dim]
             total_time_steps += nt
 
@@ -642,6 +709,9 @@ def Model_var_combine_by_time(
     out_ds.attrs["time_dimension"] = final_time_dim
     out_ds.attrs["source_file_count"] = len(files)
     out_ds.attrs["total_time_steps"] = total_time_steps
+    out_ds.attrs["cmaq_drop_last_tstep"] = str(cmaq_drop_last_tstep)
+    out_ds.attrs["cmaq_expected_tstep_per_file"] = cmaq_expected_tstep_per_file
+    out_ds.attrs["cmaq_keep_tstep_per_file"] = cmaq_keep_tstep_per_file
     out_ds.attrs["source_files"] = "\n".join(files)
 
     print_info("拼接完成", verbose)
@@ -697,6 +767,8 @@ ds = Model_var_combine_by_time(
     var_name="O3",
     output_path="./O3_combined.nc",
     time_source="cmaq",
+    # CMAQ 日文件若为 25 个 TSTEP，默认自动忽略最后一个空 TSTEP，只合并前 24 个
+    cmaq_drop_last_tstep=True,
 )
 """
 
