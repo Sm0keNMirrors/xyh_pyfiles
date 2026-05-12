@@ -367,6 +367,7 @@ def CMAQ_site_validation(
     convert_to_ppb=False,
     validate_mda8=False,
     mda8_min_hours=6,
+    grid_match_method="nearest",
     metric_method="manual",
     metric_names=None,
     obs_unit="ug/m3",
@@ -382,6 +383,10 @@ def CMAQ_site_validation(
     result_csv_name="",
     suffix="",
     save_site_timeseries=True,
+    stream_obs_csv=True,
+    timeseries_output_mode="per_station",
+    max_combine_scatter_sites=60,
+    combine_scatter_sample_size=2000,
     scatter_xlim=None,
     scatter_ylim=None,
     scatter_density=True,
@@ -396,44 +401,11 @@ def CMAQ_site_validation(
     3) convert_to_ppb=True 时，气态污染物可转 ppb；
     4) validate_mda8=True 时，执行每日 MDA8 验证，适合 O3；
     5) metric_method 可选 manual / vectorized / sklearn；
-    6) 优化输出指标表、逐站时间序列表、line / scatter / scatter_combine 图。
-
-
-    :param start_date: 验证开始日期，格式为 'YYYY-MM-DD'。
-    :param daycount: 验证持续天数。
-    :param simdata_inithour: 从 CMAQ 模拟结果中截取验证时段的起始小时索引。
-    :param GRIDCRO2D_file_dir: CMAQ 网格经纬度文件 GRIDCRO2D 路径。
-    :param Combine_file_dir: CMAQ combine 后浓度文件路径。
-    :param target_substances: CMAQ 中参与验证的目标变量名列表，多个变量会相加。
-    :param target_substance_obs: 观测 CSV 中对应污染物的 type 名称。
-    :param Molar_mass: 气态污染物分子量，设为 0 时自动识别或不转换。
-    :param ifdaily: 旧参数，True 表示日均验证，False 表示逐小时验证。
-    :param validation_freq: 验证时间尺度，可选 'hourly' 或 'daily'。
-    :param convert_to_ppb: 是否将可转换的气态污染物浓度转换为 ppb。
-    :param validate_mda8: 是否计算并验证每日 MDA8，通常用于 O3。
-    :param mda8_min_hours: 计算 MDA8 时每个 8 小时窗口所需的最少有效小时数。
-    :param metric_method: 指标计算方法，可选 'manual'、'vectorized' 或 'sklearn'。
-    :param metric_names: 需要输出的评价指标名称列表。None时则输出所有参数。
-    :param obs_unit: 观测数据原始单位，可选如 'ug/m3' 或 'ppb'。
-    :param sim_unit: CMAQ 模拟数据原始单位，可选如 'ppm'、'ppb' 或 'ug/m3'。
-    :param temperature_K: ppb 与 ug/m3 转换时使用的温度，单位 K。
-    :param pressure_atm: ppb 与 ug/m3 转换时使用的气压，单位 atm。
-    :param airstation_files_dir: 中国环境站点逐小时观测 CSV 文件所在文件夹。
-    :param airstation_infofile_dir: 中国环境站点信息 CSV 文件路径。
-    :param airstation_selected: 指定只验证的站点名称列表，空列表表示验证范围内全部站点。
-    :param result_pic_types: 输出单站图类型列表，可包含 'line'、'scatter'、'csv'。
-    :param result_pic_combine: 输出合并图类型列表，可包含 'scatter'。
-    :param out_dir: 验证结果输出文件夹。
-    :param result_csv_name: 站点评价指标表输出文件名前缀。
-    :param suffix: 输出文件名后缀。
-    :param save_site_timeseries: 是否输出所有站点的验证时间序列 CSV。
-    :param scatter_xlim: 散点图 x 轴范围，None 表示自动。
-    :param scatter_ylim: 散点图 y 轴范围，None 表示自动。
-    :param scatter_density: 散点图是否按点密度着色。
-    :param close_fig: 保存图片后是否自动关闭 figure。
-    :return: 返回包含各站点评价指标的 DataFrame。
-
-
+    6) 优化输出指标表、逐站时间序列表、line / scatter / scatter_combine 图；
+    7) grid_match_method 控制站点-格点匹配方法：
+       - 'nearest' / 'A'：最近格点；
+       - 'mean3x3' / '3x3' / 'B'：3×3 格点平均；
+       - 'bilinear' / 'idw' / 'C'：双线性插值，失败时自动回退距离加权插值。
     """
     import datetime
     import os
@@ -456,6 +428,11 @@ def CMAQ_site_validation(
         result_pic_types = []
     if result_pic_combine is None:
         result_pic_combine = []
+    timeseries_output_mode = str(timeseries_output_mode).lower()
+    if timeseries_output_mode not in ("per_station", "single", "none"):
+        raise ValueError("timeseries_output_mode must be 'per_station', 'single', or 'none'")
+    if timeseries_output_mode == "none":
+        save_site_timeseries = False
     if metric_names is None:
         metric_names = ["MAE", "RMSE", "R", "R2", "IOA", "MB", "NMB", "NME", "MFE", "MFB", "FE", "FB", "GE"]
 
@@ -466,6 +443,24 @@ def CMAQ_site_validation(
         raise ValueError("validation_freq must be 'hourly' or 'daily'")
     if validate_mda8:
         validation_freq = "daily"
+
+    # 站点-格点匹配方法：
+    # nearest / closest / A: 最近格点法；
+    # mean3x3 / 3x3 / B: 以最近格点为中心的 3×3 格点平均法；
+    # bilinear / idw / distance_weighted / C: 双线性插值；若网格不规则或无法形成包围格点，则回退到距离加权插值。
+    grid_match_method = str(grid_match_method).strip().lower()
+    grid_match_alias = {
+        "a": "nearest", "nearest": "nearest", "closest": "nearest", "最近格点": "nearest",
+        "b": "mean3x3", "3x3": "mean3x3", "mean3x3": "mean3x3", "3×3": "mean3x3", "3*3": "mean3x3",
+        "c": "bilinear", "bilinear": "bilinear", "idw": "bilinear", "distance_weighted": "bilinear",
+        "距离加权": "bilinear", "双线性": "bilinear",
+    }
+    if grid_match_method not in grid_match_alias:
+        raise ValueError(
+            "grid_match_method must be one of: "
+            "'nearest'/'A', 'mean3x3'/'3x3'/'B', 'bilinear'/'idw'/'C'"
+        )
+    grid_match_method = grid_match_alias[grid_match_method]
 
     if not target_substances:
         raise ValueError("target_substances 不能为空")
@@ -589,6 +584,128 @@ def CMAQ_site_validation(
         n2 = min(len(obs_use), len(sim_use), len(t_use))
         return np.asarray(obs_use[:n2], dtype=float), np.asarray(sim_use[:n2], dtype=float), pd.DatetimeIndex(t_use[:n2]), label
 
+    def _as_2d_grid(arr, name="grid"):
+        """
+        将 CMAQ GRIDCRO2D 的 LAT/LON 统一压缩为二维 ROW×COL。
+        兼容常见维度：
+        - (TSTEP, LAY, ROW, COL)
+        - (LAY, ROW, COL)
+        - (ROW, COL)
+        """
+        arr = np.asarray(arr)
+        arr = np.squeeze(arr)
+        if arr.ndim != 2:
+            raise ValueError(f"{name} squeeze 后仍不是二维，当前 shape={arr.shape}，请检查 GRIDCRO2D 变量维度")
+        return arr
+
+    def _get_nearest_row_col(stlat, stlon, lat2d, lon2d):
+        """返回最近格点的 ROW/COL，并自动兼容 LAT/LON 多余的 TSTEP/LAY 维度。"""
+        lat2d = _as_2d_grid(lat2d, "LAT")
+        lon2d = _as_2d_grid(lon2d, "LON")
+        difflat = stlat - lat2d
+        difflon = stlon - lon2d
+        dist2 = difflat * difflat + difflon * difflon
+        row, col = np.unravel_index(np.nanargmin(dist2), dist2.shape)
+        return int(row), int(col)
+
+    def _slice_3x3_mean(field4d, row, col):
+        """
+        B. 3×3 格点平均法：
+        以站点最近格点为中心，取周围最多 3×3 个格点的平均。
+        该方法可降低 15 km 分辨率下烟羽空间偏移 1 个格点左右造成的代表性误差。
+        """
+        nrow, ncol = field4d.shape[2], field4d.shape[3]
+        r0, r1 = max(row - 1, 0), min(row + 2, nrow)
+        c0, c1 = max(col - 1, 0), min(col + 2, ncol)
+        return np.nanmean(field4d[:, 0, r0:r1, c0:c1], axis=(1, 2))
+
+    def _idw_timeseries(field4d, stlat, stlon, lat2d, lon2d, k=4, power=2.0):
+        """
+        距离加权插值 IDW：
+        选取距离站点最近的 k 个格点，权重为 1/d^power。
+        若站点非常接近某一格点，则直接使用该格点，避免除零。
+        """
+        lat2d = _as_2d_grid(lat2d, "LAT")
+        lon2d = _as_2d_grid(lon2d, "LON")
+        dist2 = (lat2d - stlat) ** 2 + (lon2d - stlon) ** 2
+        flat_idx = np.argsort(dist2.ravel())[:k]
+        rows, cols = np.unravel_index(flat_idx, dist2.shape)
+        d = np.sqrt(dist2[rows, cols])
+        if np.nanmin(d) < 1.0e-12:
+            m = int(np.nanargmin(d))
+            return field4d[:, 0, rows[m], cols[m]]
+        w = 1.0 / np.maximum(d, 1.0e-12) ** power
+        w = w / np.nansum(w)
+        vals = field4d[:, 0, rows, cols]
+        return np.nansum(vals * w.reshape(1, -1), axis=1)
+
+    def _bilinear_or_idw_timeseries(field4d, stlat, stlon, lat2d, lon2d, row, col):
+        """
+        C. 双线性插值 / 距离加权插值法：
+        1) 优先在最近格点邻域中寻找能包围站点的 2×2 网格；
+        2) 对规则经纬度网格按经纬度方向做双线性权重；
+        3) 若网格弯曲、站点在边界、或找不到包围 2×2 网格，则回退到 IDW。
+        """
+        lat2d = _as_2d_grid(lat2d, "LAT")
+        lon2d = _as_2d_grid(lon2d, "LON")
+        nrow, ncol = lat2d.shape
+        candidates = []
+        for r in range(max(row - 1, 0), min(row + 2, nrow - 1)):
+            for c in range(max(col - 1, 0), min(col + 2, ncol - 1)):
+                lat_box = lat2d[r:r + 2, c:c + 2]
+                lon_box = lon2d[r:r + 2, c:c + 2]
+                if (
+                    np.nanmin(lat_box) <= stlat <= np.nanmax(lat_box)
+                    and np.nanmin(lon_box) <= stlon <= np.nanmax(lon_box)
+                ):
+                    # 越靠近最近格点越优先
+                    candidates.append((abs(r - row) + abs(c - col), r, c))
+
+        if candidates:
+            _, r, c = sorted(candidates, key=lambda x: x[0])[0]
+
+            # 对常见 CMAQ GRIDCRO2D 的近似规则经纬度 2D 网格：
+            # x 方向用该 2×2 小格子的经度均值，y 方向用纬度均值。
+            lon_w = np.nanmean(lon2d[r:r + 2, c])
+            lon_e = np.nanmean(lon2d[r:r + 2, c + 1])
+            lat_s = np.nanmean(lat2d[r, c:c + 2])
+            lat_n = np.nanmean(lat2d[r + 1, c:c + 2])
+
+            if abs(lon_e - lon_w) > 1.0e-12 and abs(lat_n - lat_s) > 1.0e-12:
+                x = (stlon - lon_w) / (lon_e - lon_w)
+                y = (stlat - lat_s) / (lat_n - lat_s)
+                if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
+                    q11 = field4d[:, 0, r, c]
+                    q21 = field4d[:, 0, r, c + 1]
+                    q12 = field4d[:, 0, r + 1, c]
+                    q22 = field4d[:, 0, r + 1, c + 1]
+                    return (
+                        q11 * (1.0 - x) * (1.0 - y)
+                        + q21 * x * (1.0 - y)
+                        + q12 * (1.0 - x) * y
+                        + q22 * x * y
+                    ), "bilinear"
+
+        return _idw_timeseries(field4d, stlat, stlon, lat2d, lon2d), "idw"
+
+    def _extract_sim_hour(field4d, stlat, stlon, lat2d, lon2d, method):
+        """根据 grid_match_method 提取站点对应的 CMAQ 逐小时模拟序列。"""
+        row, col = _get_nearest_row_col(stlat, stlon, lat2d, lon2d)
+
+        if method == "nearest":
+            series = field4d[:, 0, row, col]
+            actual_method = "nearest"
+        elif method == "mean3x3":
+            series = _slice_3x3_mean(field4d, row, col)
+            actual_method = "mean3x3"
+        elif method == "bilinear":
+            series, actual_method = _bilinear_or_idw_timeseries(field4d, stlat, stlon, lat2d, lon2d, row, col)
+        else:
+            raise ValueError(f"Unsupported grid_match_method: {method}")
+
+        sim_hour_raw = np.asarray(series[simdata_inithour:simdata_inithour + 24 * daycount], dtype=float)
+        return sim_hour_raw, row, col, actual_method
+
     def _paired_clean(sim, obs):
         sim = np.asarray(sim, dtype=float)
         obs = np.asarray(obs, dtype=float)
@@ -708,20 +825,52 @@ def CMAQ_site_validation(
         raise ValueError("metric_method must be 'manual', 'vectorized', or 'sklearn'")
 
     def _read_obs_for_station(air_csv_data, station_col):
+        """
+        读取单个站点的逐小时观测值。
+
+        内存优化：
+        stream_obs_csv=True 时，air_csv_data 为 CSV 路径列表；
+        每天只读取 type/hour/本站点 三列，避免一次性加载全国所有站点宽表。
+        """
         vals = []
-        for df in air_csv_data:
+
+        for item in air_csv_data:
+            if stream_obs_csv:
+                fp = item
+                if not os.path.exists(fp):
+                    vals.extend([np.nan] * 24)
+                    continue
+
+                try:
+                    df = pd.read_csv(
+                        fp,
+                        usecols=lambda c: c in {"type", "hour", station_col}
+                    )
+                except Exception:
+                    vals.extend([np.nan] * 24)
+                    continue
+            else:
+                df = item
+
             subdf = df[df['type'] == target_substance_obs] if 'type' in df.columns else pd.DataFrame()
             if subdf.empty or station_col not in subdf.columns:
                 vals.extend([np.nan] * 24)
                 continue
+
             subdf = subdf[['hour', station_col]].copy()
             subdf['hour'] = pd.to_numeric(subdf['hour'], errors='coerce')
             subdf[station_col] = pd.to_numeric(subdf[station_col], errors='coerce')
             subdf = subdf.dropna(subset=['hour'])
             subdf['hour'] = subdf['hour'].astype(int)
+
             hour_map = dict(zip(subdf['hour'], subdf[station_col]))
             vals.extend([hour_map.get(h, np.nan) for h in range(24)])
+
+            if stream_obs_csv:
+                del df, subdf
+
         return np.asarray(vals, dtype=float)
+
 
     def _safe_station_filename(stname):
         pin = chinese_to_pinyin(stname, mode="abbr", uppercase=True, keep_non_chinese=True)
@@ -854,13 +1003,18 @@ def CMAQ_site_validation(
             filedate = ''.join(date2.split('-'))
             airStation_csv_list.append(os.path.join(airstation_files_dir, f"china_sites_{filedate}.csv"))
 
-        air_csv_data = []
-        for fp in airStation_csv_list:
-            if os.path.exists(fp):
-                air_csv_data.append(pd.read_csv(fp))
-            else:
-                print(f"[WARN] obs csv not found: {fp}")
-                air_csv_data.append(pd.DataFrame(columns=["type", "hour"]))
+        # 内存优化：默认不一次性读取所有日期的全国站点 CSV。
+        # stream_obs_csv=True 时这里只保存路径，逐站处理时只读本站点列。
+        if stream_obs_csv:
+            air_csv_data = airStation_csv_list
+        else:
+            air_csv_data = []
+            for fp in airStation_csv_list:
+                if os.path.exists(fp):
+                    air_csv_data.append(pd.read_csv(fp))
+                else:
+                    print(f"[WARN] obs csv not found: {fp}")
+                    air_csv_data.append(pd.DataFrame(columns=["type", "hour"]))
 
         substance = None
         for sub in target_substances:
@@ -869,12 +1023,19 @@ def CMAQ_site_validation(
             arr = np.array(CMAQoutf.variables[sub][:], dtype=np.float32)
             substance = arr if substance is None else substance + arr
 
-        CMAQXLAT = np.array(GRIDCRO2D.variables['LAT'][:][0])
-        CMAQXLONG = np.array(GRIDCRO2D.variables['LON'][:][0])
+        CMAQXLAT = _as_2d_grid(GRIDCRO2D.variables['LAT'][:], "LAT")
+        CMAQXLONG = _as_2d_grid(GRIDCRO2D.variables['LON'][:], "LON")
 
         result_rows = []
-        series_rows = []
+        series_rows = []  # 仅兼容保留；默认不再累计所有站点时间序列
         combine_scatter_data = []
+
+        ts_dir = os.path.join(out_dir, "csv_timeseries")
+        if save_site_timeseries or "csv" in result_pic_types:
+            os.makedirs(ts_dir, exist_ok=True)
+        single_ts_path = os.path.join(ts_dir, f"site_timeseries_{suffix}.csv")
+        single_ts_header_written = False
+        rng_sample = np.random.default_rng(1234)
 
         for stname, airstation in tqdm(airStation_locations.items(), desc='处理所有有效站点...'):
             stlon = float(airstation[0])
@@ -882,12 +1043,9 @@ def CMAQ_site_validation(
             station_col = airstation[2]
             stcity = airstation[3]
 
-            nearpos = getNearestPos(stlat, stlon, CMAQXLAT, CMAQXLONG)
-            nearlat = int(nearpos[1])
-            nearlon = int(nearpos[2])
-
-            sim_raw = substance[:, 0, nearlat, nearlon]
-            sim_hour_raw = np.asarray(sim_raw[simdata_inithour:simdata_inithour + 24 * daycount], dtype=float)
+            sim_hour_raw, nearlat, nearlon, actual_grid_match_method = _extract_sim_hour(
+                substance, stlat, stlon, CMAQXLAT, CMAQXLONG, grid_match_method
+            )
             obs_hour_raw = _read_obs_for_station(air_csv_data, station_col)
 
             if np.all(~np.isfinite(obs_hour_raw)):
@@ -912,6 +1070,8 @@ def CMAQ_site_validation(
                 "验证频率": validation_label,
                 "单位": unit_label,
                 "指标算法": metric_method,
+                "格点匹配方法": grid_match_method,
+                "实际格点匹配方法": actual_grid_match_method,
                 "是否ppb转换": bool(convert_to_ppb),
                 "是否MDA8": bool(validate_mda8),
             }
@@ -934,8 +1094,22 @@ def CMAQ_site_validation(
             if "scatter" in result_pic_types:
                 _plot_scatter(obs_use, sim_use, stname, stcity, metrics, unit_label)
 
-            if "scatter" in result_pic_combine:
-                combine_scatter_data.append((obs_use, sim_use, stname, stcity, metrics, unit_label))
+            if "scatter" in result_pic_combine and len(combine_scatter_data) < max_combine_scatter_sites:
+                obs_c = np.asarray(obs_use, dtype=float)
+                sim_c = np.asarray(sim_use, dtype=float)
+
+                if combine_scatter_sample_size is not None:
+                    valid_idx = np.where(np.isfinite(obs_c) & np.isfinite(sim_c))[0]
+                    if valid_idx.size > combine_scatter_sample_size:
+                        keep_idx = rng_sample.choice(valid_idx, size=combine_scatter_sample_size, replace=False)
+                        keep_idx.sort()
+                        obs_c = obs_c[keep_idx]
+                        sim_c = sim_c[keep_idx]
+
+                combine_scatter_data.append((obs_c, sim_c, stname, stcity, metrics, unit_label))
+
+            # 主动释放当前站点数组引用，降低长循环内存峰值。
+            del obs_hour_raw, sim_hour_raw, obs_hour, sim_hour, obs_use, sim_use
 
         result_csv_data = pd.DataFrame(result_rows)
         result_path = os.path.join(out_dir, f"{result_csv_name or 'validation_metrics'}_{suffix}.csv")
@@ -943,13 +1117,16 @@ def CMAQ_site_validation(
         print(f"[OK] metrics csv -> {result_path}")
 
         if save_site_timeseries or "csv" in result_pic_types:
-            ts_dir = os.path.join(out_dir, "csv_timeseries")
-            os.makedirs(ts_dir, exist_ok=True)
-            ts_path = os.path.join(ts_dir, f"site_timeseries_{suffix}.csv")
-            pd.DataFrame(series_rows).to_csv(ts_path, index=False, encoding='utf-8-sig')
-            print(f"[OK] site time series csv -> {ts_path}")
+            if timeseries_output_mode == "single":
+                print(f"[OK] site time series csv -> {single_ts_path}")
+            elif timeseries_output_mode == "per_station":
+                print(f"[OK] per-station time series csv -> {ts_dir}")
+            else:
+                print("[INFO] time series csv skipped by timeseries_output_mode='none'")
 
         if "scatter" in result_pic_combine and len(combine_scatter_data) > 0:
+            if len(airStation_locations) > max_combine_scatter_sites:
+                print(f"[WARN] scatter_combine 仅绘制前 {max_combine_scatter_sites} 个站点，避免站点过多导致内存不足。")
             nn, mm = calculate_figRowCol_size(len(combine_scatter_data))
             fig_c, axs_c = plt.subplots(nn, mm, figsize=(4.2 * mm, 4.2 * nn), dpi=220, squeeze=False)
             for i, (obs_use, sim_use, stname, stcity, metrics, unit_label) in enumerate(combine_scatter_data):
