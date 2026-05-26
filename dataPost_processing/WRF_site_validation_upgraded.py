@@ -67,6 +67,35 @@ def _safe_station_filename(text):
     return text.strip("_") or "station"
 
 
+def _station_title_name(text):
+    """
+    将站点名转换为绘图标题中安全显示的英文/拼音形式。
+    只影响图标题，不影响 CSV 中的原始中文站点名。
+    """
+    if not isinstance(text, str):
+        text = str(text)
+
+    try:
+        from pypinyin import pinyin, Style
+        parts = []
+        py_items = pinyin(text, style=Style.NORMAL, strict=False)
+
+        for ch, item in zip(text, py_items):
+            if re.match(r"[\u4e00-\u9fff]", ch):
+                parts.append(str(item[0]).capitalize())
+            else:
+                parts.append(ch)
+
+        out = "".join(parts)
+    except Exception:
+        out = _safe_station_filename(text)
+
+    out = re.sub(r"[^A-Za-z0-9_.|() \-]+", "", out)
+    out = re.sub(r"\s+", " ", out).strip()
+    return out or "station"
+
+
+
 def _to_float_array(values):
     return np.asarray(values, dtype=float)
 
@@ -682,12 +711,55 @@ def _plot_line(
     suffix="",
     close_fig=True,
 ):
+    """
+    绘制 Obs-Sim 时间序列图。
+
+    关键修复：
+    1. Obs 使用 scatter，只绘制有限观测点；
+    2. 允许观测值为 3h/6h 间隔，中间 NaN 不补值、不连线；
+    3. Sim 保持连续折线；
+    4. 标题站点名使用拼音/ASCII，避免中文字体缺失显示方框。
+    """
     pics_dir = os.path.join(out_dir, "pics_line", var_name)
     _ensure_dir(pics_dir)
 
+    time_arr = pd.DatetimeIndex(time_use)
+    obs_arr = np.asarray(obs_use, dtype=float)
+    sim_arr = np.asarray(sim_use, dtype=float)
+
+    n = min(len(time_arr), len(obs_arr), len(sim_arr))
+    time_arr = time_arr[:n]
+    obs_arr = obs_arr[:n]
+    sim_arr = sim_arr[:n]
+
+    # 注意：Obs 绘图只要求观测值自身有效，不要求同一时刻 Sim 也有效。
+    # 这样 3 小时间隔观测或大量缺测时，仍能把已有观测点画出来。
+    obs_valid = np.isfinite(obs_arr)
+
     fig, ax = plt.subplots(figsize=(5.8, 2.4), dpi=220)
-    ax.plot(time_use, obs_use, linewidth=1.0, label="Obs", color="#258080")
-    ax.plot(time_use, sim_use, linewidth=1.0, label="Sim", color="red", alpha=0.85)
+
+    sim_line, = ax.plot(
+        time_arr,
+        sim_arr,
+        linewidth=1.0,
+        label="Sim",
+        color="red",
+        alpha=0.85,
+        zorder=2,
+    )
+
+    obs_scatter = ax.scatter(
+        time_arr[obs_valid],
+        obs_arr[obs_valid],
+        s=14,
+        marker="o",
+        label="Obs",
+        color="#258080",
+        edgecolors="black",
+        linewidths=0.25,
+        alpha=0.95,
+        zorder=4,
+    )
 
     ax.set_ylabel(unit_label, fontsize=9)
     ax.set_xlabel("Date", fontsize=9)
@@ -697,7 +769,16 @@ def _plot_line(
     ax.grid(True, which="major", linewidth=0.3, alpha=0.35)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.legend(loc="upper right", frameon=False, fontsize=7, handlelength=2.2, borderaxespad=0.2)
+
+    ax.legend(
+        handles=[obs_scatter, sim_line],
+        labels=["Obs", "Sim"],
+        loc="upper right",
+        frameon=False,
+        fontsize=7,
+        handlelength=2.2,
+        borderaxespad=0.2,
+    )
 
     metric_txt = []
     for k in ["IOA", "MB", "RMSE", "R", "NMB"]:
@@ -719,7 +800,23 @@ def _plot_line(
             bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
         )
 
-    ax.set_title(f"{stname} | {var_name} | {validation_label}", loc="right", fontsize=7)
+    if int(np.sum(obs_valid)) == 0:
+        ax.text(
+            0.5,
+            0.5,
+            "No valid observations",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="gray",
+        )
+
+    ax.set_title(
+        f"{_station_title_name(stname)} | {var_name} | {validation_label}",
+        loc="right",
+        fontsize=7,
+    )
     fig.tight_layout()
 
     fname = f"{_safe_station_filename(stname)}_{var_name}_{suffix}.png" if suffix else f"{_safe_station_filename(stname)}_{var_name}.png"
@@ -803,7 +900,7 @@ def _scatter_core(
             unit = "%" if k == "NMB" else ""
             stats.append(f"{k}={metrics[k]:.2f}{unit}")
 
-    ax.set_title(f"{stname} | {var_name}\n" + "  ".join(stats), fontsize=8)
+    ax.set_title(f"{_station_title_name(stname)} | {var_name}\n" + "  ".join(stats), fontsize=8)
     ax.legend(frameon=False, fontsize=7, loc="lower right")
 
 
@@ -1257,24 +1354,24 @@ def WRF_site_validation(
     return result_csv_data
 
 
-if __name__ == "__main__":
-    # 示例：
-    WRF_site_validation(
-        start_date="2022-08-01",
-        daycount=31,
-        wrfout_files_dir=r"E:\CMAQdata_chengdu202208\WRFd03_2\\",
-        target_domain="d03",
-        metstation_files_dir=r"E:\气象站数据\china_isdsite_metdata\\",
-        metstation_infofile_dir=r"E:\气象站数据\全国气象站位置信息\站点列表_原始数据.csv",
-        result_pic_types=["line", "scatter", "csv"],
-        result_pic_combine=[],
-        out_dir=r"E:\Emission_update\\test_wrf_validation\\",
-        result_csv_name="validationPara_WRF",
-        suffix="CD202208",
-        validation_freq="hourly",
-        metric_method="vectorized",
-        save_site_timeseries=True,
-        timeseries_output_mode="per_station",
-        save_converted_met_csv=False,
-        save_metrics_xlsx=False,
-    )
+# if __name__ == "__main__":
+#     # 示例：
+#     WRF_site_validation(
+#         start_date="2022-08-01",
+#         daycount=31,
+#         wrfout_files_dir=r"E:\CMAQdata_chengdu202208\WRFd03_2\\",
+#         target_domain="d03",
+#         metstation_files_dir=r"E:\气象站数据\china_isdsite_metdata\\",
+#         metstation_infofile_dir=r"E:\气象站数据\全国气象站位置信息\站点列表_原始数据.csv",
+#         result_pic_types=["line", "scatter", "csv"],
+#         result_pic_combine=[],
+#         out_dir=r"E:\Emission_update\\test_wrf_validation\\",
+#         result_csv_name="validationPara_WRF",
+#         suffix="CD202208",
+#         validation_freq="hourly",
+#         metric_method="vectorized",
+#         save_site_timeseries=True,
+#         timeseries_output_mode="per_station",
+#         save_converted_met_csv=False,
+#         save_metrics_xlsx=False,
+#     )
